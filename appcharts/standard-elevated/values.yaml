@@ -1,0 +1,31 @@
+# Custom app chart values — extends the standard Epinio application chart.
+# See standard chart for the full epinio.* API documentation.
+
+image:
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+epinio:
+  tlsIssuer: ~
+  ingress: ~
+  appName: placeholder
+  replicaCount: 1
+  stageID: 999
+  imageURL: ~
+  username: user
+  routes: ~
+  env: ~
+  configurations: ~
+  start: ~
+
+resources: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}
+userConfig: {}
+
+# Custom: enable RBAC for reading Epinio app CRDs.
+# DEPRECATED: Remove when Epinio exposes blobuid in the REST API.
+appCrdAccess:
+  enabled: true

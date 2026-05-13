@@ -1,0 +1,59 @@
+# Chart server for Epinio custom AppCharts.
+#
+# A minimal nginx pod that serves the `epinio-application-0.1.26.tgz` Helm chart
+# from a ConfigMap, so `standard-elevated` (and any future custom AppCharts that
+# reference `http://chart-server.epinio.svc.cluster.local/charts/...`) can pull
+# without touching GitHub.
+#
+# Apply once per cluster that runs a custom AppChart:
+#
+#   kubectl apply -f manifests/chart-server.yaml
+#
+# The chart tgz is the upstream epinio-application-0.1.26 chart with the
+# per-app ServiceAccount template extended for `apps.application.epinio.io`
+# read access — paired with manifests/standard-elevated-appchart.yaml.
+apiVersion: v1
+binaryData:
+  chart.tgz: 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
+kind: ConfigMap
+metadata:
+  name: epinio-mcp-chart
+  namespace: epinio
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: chart-server
+  namespace: epinio
+spec:
+  ports:
+  - port: 80
+    protocol: TCP
+    targetPort: 80
+  selector:
+    app: chart-server
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    app: chart-server
+  name: chart-server
+  namespace: epinio
+spec:
+  containers:
+  - image: nginx:alpine
+    name: nginx
+    ports:
+    - containerPort: 80
+      protocol: TCP
+    volumeMounts:
+    - mountPath: /usr/share/nginx/html/charts
+      name: chart
+  volumes:
+  - configMap:
+      items:
+      - key: chart.tgz
+        path: epinio-application-0.1.26.tgz
+      name: epinio-mcp-chart
+    name: chart

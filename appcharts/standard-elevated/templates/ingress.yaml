@@ -1,0 +1,55 @@
+{{- range .Values.epinio.routes }}
+{{- if not .secret }}
+---
+apiVersion: "cert-manager.io/v1"
+kind: Certificate
+metadata:
+  name: {{ include "epinio-truncate" (print $.Values.epinio.appName "-" .id) }}
+  labels:
+    {{- include "epinio-application.labels" $ | nindent 4 }}
+  annotations:
+    {{- include "epinio-application.annotations" $ | nindent 4 }}
+spec:
+  secretName: {{ include "epinio-truncate" (print $.Values.epinio.appName "-" .id "-tls") }}
+  dnsNames:
+  - {{ .domain | quote }}
+  issuerRef:
+    name : {{ $.Values.epinio.tlsIssuer | quote }}
+    kind: ClusterIssuer
+{{- end }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "epinio-truncate" (print $.Values.epinio.appName "-" .id) }}
+  namespace: {{ $.Release.Namespace | quote }}
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+    {{- include "epinio-application.annotations" $ | nindent 4 }}
+  labels:
+    {{- include "epinio-application.labels" $ | nindent 4 }}
+spec:
+  {{- with $.Values.epinio.ingress }}
+  ingressClassName: {{ . | quote }}
+  {{- end }}
+  rules:
+    - host: {{ .domain | quote }}
+      http:
+        paths:
+          - backend:
+              service:
+                name: {{ include "epinio-truncate" $.Values.epinio.appName }}
+                port:
+                  number: 8080
+            path: {{ .path | quote }}
+            pathType: ImplementationSpecific
+  tls:
+    - hosts:
+      - {{ .domain | quote }}
+{{- if .secret }}
+      secretName: {{ .secret | quote }}
+{{- else }}
+      secretName: {{ include "epinio-truncate" (print $.Values.epinio.appName "-" .id "-tls") }}
+{{- end }}
+{{- end }}

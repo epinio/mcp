@@ -1,0 +1,64 @@
+# epinio-mcp-broad-rbac.yaml — optional cluster-wide adoption privileges.
+#
+# Apply this ONLY if you want the MCP's `adopt_app` / `reconcile_app` /
+# `release_app` tools to work across namespaces other than `epinio`.
+#
+# The default install (install/epinio-mcp.yaml) scopes write permissions
+# to the `epinio` namespace — enough for the MCP to self-adopt and
+# self-reconcile, but not enough to adopt arbitrary workloads elsewhere.
+#
+# This supplementary ClusterRole + ClusterRoleBinding grants the
+# cross-namespace writes that general adoption requires. Consider the
+# privilege escalation before applying:
+#   - The MCP pod SA gains cluster-wide create/patch/delete on Epinio App
+#     CRDs, Secrets, Deployments, Services.
+#   - Anyone with the ability to call the MCP's adopt_app tool can affect
+#     arbitrary workloads.
+# If you want stricter scoping, edit the rules below to list specific
+# target namespaces via a RoleBinding in each, rather than a
+# ClusterRoleBinding.
+#
+# Apply:
+#   kubectl apply -f install/epinio-mcp-broad-rbac.yaml
+# Revoke:
+#   kubectl delete -f install/epinio-mcp-broad-rbac.yaml
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: epinio-mcp-adoption
+  labels:
+    app.kubernetes.io/name: epinio-mcp
+rules:
+  - apiGroups: ["application.epinio.io"]
+    resources: ["apps"]
+    verbs: ["create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "create", "update", "patch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "patch"]
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get", "list", "patch"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["get", "list"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: epinio-mcp-adoption
+  labels:
+    app.kubernetes.io/name: epinio-mcp
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: epinio-mcp-adoption
+subjects:
+  - kind: ServiceAccount
+    name: epinio-mcp
+    namespace: epinio

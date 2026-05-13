@@ -1,0 +1,86 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "epinio-truncate" .Values.epinio.appName }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "epinio-application.labels" . | nindent 4 }}
+  annotations:
+    {{- include "epinio-application.annotations" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.epinio.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ .Values.epinio.appName | quote }}
+  template:
+    metadata:
+      annotations:
+        app.kubernetes.io/name: {{ .Values.epinio.appName | quote }}
+        {{- include "epinio-application.annotations" . | nindent 8 }}
+        {{- with .Values.epinio.start }}
+        epinio.io/start: {{ . | quote }}
+        {{- end }}
+      labels:
+        {{- include "epinio-application.labels" . | nindent 8 }}
+        epinio.io/stage-id: {{ .Values.epinio.stageID | quote }}
+        epinio.io/app-container: {{ include "epinio-truncate" .Values.epinio.appName }}
+    spec:
+      {{- if .Values.appCrdAccess.enabled }}
+      serviceAccount: {{ include "epinio-truncate" .Values.epinio.appName }}-sa
+      serviceAccountName: {{ include "epinio-truncate" .Values.epinio.appName }}-sa
+      {{- else }}
+      serviceAccount: {{ .Release.Namespace }}
+      serviceAccountName: {{ .Release.Namespace }}
+      {{- end }}
+      automountServiceAccountToken: true
+      {{- with .Values.epinio.configurations }}
+      volumes:
+      {{- range . }}
+      - name: {{ . }}
+        secret:
+          defaultMode: 420
+          secretName: {{ . }}
+      {{- end }}
+      {{- end }}
+      containers:
+      - name: {{ include "epinio-truncate" .Values.epinio.appName }}
+        ports:
+        - containerPort: {{ include "epinio-app-listening-port" . }}
+          protocol: TCP
+        {{- with .Values.epinio.configpaths }}
+        volumeMounts:
+        {{- range . }}
+        - mountPath: /configurations/{{ .path }}
+          name: {{ .name }}
+          readOnly: true
+        {{- end }}
+        {{- end }}
+        env:
+        - name: PORT
+          value: {{ include "epinio-app-listening-port" . | quote }}
+        {{- range .Values.epinio.env }}
+        - name: {{ .name | quote }}
+          value: {{ .value | quote }}
+        {{- end}}
+        image: {{ .Values.epinio.imageURL }}
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        {{- with .Values.resources }}
+        resources:
+          {{- toYaml . | nindent 10 }}
+        {{- end}}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

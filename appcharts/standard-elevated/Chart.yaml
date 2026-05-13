@@ -1,0 +1,10 @@
+apiVersion: v2
+name: epinio-application
+description: Custom Epinio app chart with service account RBAC for reading app CRDs and registry push access
+home: https://github.com/epinio/epinio
+icon: https://raw.githubusercontent.com/epinio/helm-charts/main/assets/epinio.png
+keywords:
+- epinio
+- paas
+type: application
+version: 0.1.26

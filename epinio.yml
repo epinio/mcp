@@ -1,0 +1,30 @@
+name: epinio-mcp
+
+configuration:
+  instances: 1
+  # `standard-elevated` gives this app a per-app ServiceAccount with read
+  # access to apps.application.epinio.io CRDs — powers the blobuid lookup the
+  # `app_editing` capability needs for source retrieval. Apply the chart once
+  # per cluster with manifests/standard-elevated-appchart.yaml.
+  appchart: standard-elevated
+  configurations:
+    # Bound so the pod's /configurations/epinio-s3-gateway/ mount gives us
+    # endpoint + credentials for source retrieval. Create the service first:
+    #   epinio service create s3-gateway epinio-s3-gateway
+    - epinio-s3-gateway
+  environment:
+    # EDIT before pushing — set these to your Epinio cluster values
+    EPINIO_API_URL: "https://epinio.192.168.49.2.sslip.io"
+    EPINIO_USERNAME: "admin"
+    EPINIO_PASSWORD: "password"
+    # OIDC token auth (optional — takes precedence over basic auth when set)
+    # EPINIO_TOKEN: ""
+    # EPINIO_REFRESH_TOKEN: ""
+    # EPINIO_TOKEN_ENDPOINT: ""
+    # Self-identity — used by ConfigurationBindingReq to verify this pod's
+    # own bindings. Override per deployment if the app is named differently.
+    EPINIO_MCP_APP_NAME: "epinio-mcp"
+    EPINIO_MCP_APP_NAMESPACE: "epinio"
+
+staging:
+  builder: "paketobuildpacks/builder-jammy-full:0.3.606"

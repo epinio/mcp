@@ -1,0 +1,129 @@
+version: '3'
+
+# Run `task` with no arguments to list available tasks.
+# Full first-time setup: task setup
+# Individual steps:    task cluster-prep | task s3-service | task configure-s3 | task push | task verify
+
+tasks:
+  default:
+    desc: List available tasks
+    cmds:
+      - task --list
+    silent: true
+
+  cluster-prep:
+    desc: "(cluster-admin, once per cluster) Apply manifests and label the epinio namespace"
+    cmds:
+      # Chart server — serves the standard-elevated AppChart tarball from inside the cluster
+      - kubectl apply -f manifests/chart-server.yaml
+      - kubectl -n epinio wait pod/chart-server --for=condition=ready --timeout=60s
+
+      # Register the standard-elevated AppChart (grants MCP pod RBAC to read App CRDs)
+      - kubectl apply -f manifests/standard-elevated-appchart.yaml
+
+      # Register the s3-gateway catalog entry (allows Epinio to provision an S3 gateway)
+      - kubectl apply -f manifests/s3-gateway-catalog-entry.yaml
+
+      # The epinio namespace is not managed by Epinio by default label it so
+      # Epinio can deploy services (like the s3-gateway) into it.
+      - kubectl label namespace epinio app.kubernetes.io/component=epinio-namespace --overwrite
+
+      - echo "✓ cluster-prep complete"
+
+  s3-service:
+    desc: Create the epinio-s3-gateway service instance and wait until deployed
+    cmds:
+      - epinio service create s3-gateway epinio-s3-gateway || echo "(service already exists, skipping)"
+      - |
+        echo "Waiting for epinio-s3-gateway to reach deployed status..."
+        for i in $(seq 1 36); do
+          STATUS=$(epinio service show epinio-s3-gateway 2>/dev/null \
+            | awk -F'|' '/\| Status/{gsub(/[[:space:]]/, "", $3); print $3}')
+          if [ "$STATUS" = "deployed" ]; then
+            echo "✓ epinio-s3-gateway is deployed"
+            exit 0
+          fi
+          echo "  ($i/36) status: ${STATUS:-pending} — retrying in 5s"
+          sleep 5
+        done
+        echo "ERROR: epinio-s3-gateway did not reach deployed status after 3 minutes"
+        echo "Run: epinio service show epinio-s3-gateway"
+        exit 1
+
+  configure-s3:
+    desc: Create the epinio-s3-gateway Epinio configuration from the cluster's S3 credentials (idempotent)
+    cmds:
+      - |
+        # Epinio does not auto-create a configuration from the service Secret.
+        # The real S3 credentials live in epinio-s3-connection-details (written
+        # by Epinio's own Helm install). Read them and create the configuration
+        # so epinio push can bind it. Safe to re-run — skips if already exists.
+        if epinio configuration show epinio-s3-gateway >/dev/null 2>&1; then
+          echo "(epinio-s3-gateway configuration already exists, skipping)"
+          exit 0
+        fi
+        ENDPOINT=$(kubectl -n epinio get secret epinio-s3-connection-details \
+          -o jsonpath='{.data.endpoint}' | base64 -d)
+        BUCKET=$(kubectl -n epinio get secret epinio-s3-connection-details \
+          -o jsonpath='{.data.bucket}' | base64 -d)
+        USESSL=$(kubectl -n epinio get secret epinio-s3-connection-details \
+          -o jsonpath='{.data.useSSL}' | base64 -d)
+        CREDS=$(kubectl -n epinio get secret epinio-s3-connection-details \
+          -o jsonpath='{.data.credentials}' | base64 -d)
+        epinio target epinio
+        epinio configuration create epinio-s3-gateway \
+          endpoint "$ENDPOINT" \
+          bucket   "$BUCKET" \
+          useSSL   "$USESSL" \
+          credentials "$CREDS"
+        echo "✓ epinio-s3-gateway configuration created"
+
+  push:
+    desc: Push the MCP to Epinio — edit epinio.yml with your credentials first
+    preconditions:
+      - sh: grep -q 'EPINIO_API_URL' epinio.yml
+        msg: "epinio.yml not found — are you in the repo root?"
+    cmds:
+      - epinio target epinio
+      - epinio push
+      - echo "✓ push complete"
+
+  verify:
+    desc: Smoke-test /healthz and /readyz on the deployed MCP
+    cmds:
+      - |
+        ROUTE=$(epinio app show epinio-mcp 2>/dev/null \
+          | awk '/Active Routes/{found=1; next} found && /\|/{gsub(/[| ]/, ""); if(length($0)>4){print; exit}}')
+        if [ -z "$ROUTE" ]; then
+          echo "ERROR: could not determine route — is epinio-mcp running?"
+          echo "Run: epinio app show epinio-mcp"
+          exit 1
+        fi
+        echo "Route: https://$ROUTE"
+        echo "Waiting for ingress to propagate..."
+        for i in $(seq 1 20); do
+          H=$(curl -sk -o /dev/null -w "%{http_code}" "https://$ROUTE/healthz")
+          R=$(curl -sk -o /dev/null -w "%{http_code}" "https://$ROUTE/readyz")
+          if [ "$H" = "200" ] && [ "$R" != "404" ]; then
+            break
+          fi
+          echo "  ($i/20) healthz=$H readyz=$R — retrying in 3s"
+          sleep 3
+        done
+        echo ""
+        echo "--- /healthz ---"
+        curl -sk "https://$ROUTE/healthz"
+        echo ""
+        echo ""
+        echo "--- /readyz ---"
+        curl -sk "https://$ROUTE/readyz"
+        echo ""
+
+  setup:
+    desc: Full first-time install — cluster-prep → s3-service → configure-s3 → push → verify
+    cmds:
+      - task: cluster-prep
+      - task: s3-service
+      - task: configure-s3
+      - task: push
+      - task: verify

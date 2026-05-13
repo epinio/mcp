@@ -1,0 +1,47 @@
+{{- if .Values.appCrdAccess.enabled }}
+# Custom ServiceAccount with registry pull credentials and app CRD read access.
+# DEPRECATED: Remove when Epinio exposes blobuid in the REST API response,
+# making direct CRD reads unnecessary.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "epinio-truncate" .Values.epinio.appName }}-sa
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "epinio-application.labels" . | nindent 4 }}
+  annotations:
+    {{- include "epinio-application.annotations" . | nindent 4 }}
+imagePullSecrets:
+- name: registry-creds
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "epinio-truncate" .Values.epinio.appName }}-app-reader
+  labels:
+    {{- include "epinio-application.labels" . | nindent 4 }}
+  annotations:
+    {{- include "epinio-application.annotations" . | nindent 4 }}
+    deprecated: "Remove when Epinio exposes blobuid in REST API"
+rules:
+- apiGroups: ["application.epinio.io"]
+  resources: ["apps"]
+  verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "epinio-truncate" .Values.epinio.appName }}-app-reader
+  labels:
+    {{- include "epinio-application.labels" . | nindent 4 }}
+  annotations:
+    {{- include "epinio-application.annotations" . | nindent 4 }}
+subjects:
+- kind: ServiceAccount
+  name: {{ include "epinio-truncate" .Values.epinio.appName }}-sa
+  namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "epinio-truncate" .Values.epinio.appName }}-app-reader
+{{- end }}

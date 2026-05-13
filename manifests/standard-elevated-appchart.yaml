@@ -1,0 +1,46 @@
+# AppChart: standard-elevated
+#
+# Extends Epinio's default `standard` chart with a per-app ServiceAccount that
+# holds:
+#   - read access to apps.application.epinio.io (powers blobuid/source
+#     retrieval — used by this MCP's `app_editing` capability)
+#   - the registry-creds imagePullSecret (for apps that interact with the
+#     internal container registry)
+#
+# Apply once per cluster (into the `epinio` system namespace, which is where
+# Epinio looks up AppChart resources):
+#
+#   kubectl apply -f manifests/standard-elevated-appchart.yaml
+#
+# Verify from the Epinio CLI side:
+#
+#   epinio app chart list     # should show `standard-elevated`
+#
+# Point the MCP at it via `appchart: standard-elevated` in epinio.yml.
+#
+# NOTE: the app CRD read access is a workaround until Epinio's REST API
+# exposes `blobuid` directly. When that lands, this chart's `appCrdAccess`
+# option can be turned off (or the chart dropped entirely) and the MCP can
+# fall back to the `standard` chart.
+apiVersion: application.epinio.io/v1
+kind: AppChart
+metadata:
+  name: standard-elevated
+  namespace: epinio
+spec:
+  description: |
+    Extends the standard Epinio app chart with a per-app ServiceAccount that has:
+    - Read access to apps.application.epinio.io CRDs (for blobuid/source retrieval)
+    - Registry pull credentials (registry-creds imagePullSecret)
+
+    Use this chart for apps that need to query Epinio app metadata or interact
+    with the internal container registry.
+
+    NOTE: The app CRD read access is a workaround until Epinio exposes blobuid
+    in the REST API. The appCrdAccess setting can be disabled when that lands.
+  helmChart: http://chart-server.epinio.svc.cluster.local/charts/epinio-application-0.1.26.tgz
+  settings:
+    appListeningPort:
+      minimum: "0"
+      type: integer
+  shortDescription: Standard chart with elevated RBAC (app CRD read, registry access)

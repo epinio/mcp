@@ -1,0 +1,410 @@
+# epinio-mcp.yaml — single-manifest install for the Epinio MCP server.
+#
+# Prerequisite: Epinio is installed in this cluster (helm install of the
+# epinio chart, typically under the "epinio" namespace).
+#
+# Apply:
+#   kubectl apply -f install/epinio-mcp.yaml
+#
+# Next: chat with the MCP and run `enable_capability(name="self_adoption")`
+# to have it finish its own setup (fill adoption metadata, create the
+# s3-gateway catalog service + instance if needed, populate its own S3
+# credentials, and restart itself). See install/README.md for the full flow.
+#
+# This install deploys the MCP as a plain Kubernetes workload *and*
+# creates an Epinio App CRD so `epinio app list`, `show`, `logs`, `exec`
+# continue to work. Destructive Epinio operations (`update`, `restart`,
+# `delete`, `configuration bind`) are refused by the MCP on adopted apps
+# — use `kubectl` for lifecycle operations or run `release_app` to
+# convert back to plain k8s.
+#
+# Edit before applying:
+#   - Deployment image tag (pin to a released version)
+#   - Secret values for server-level identity (username/password or OIDC)
+#   - Optional Ingress block at the bottom (host + TLS)
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: epinio
+  labels:
+    kubernetes.io/metadata.name: epinio
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: epinio-mcp
+  namespace: epinio
+  labels:
+    app.kubernetes.io/name: epinio-mcp
+    app.kubernetes.io/component: application
+    app.kubernetes.io/managed-by: epinio
+    app.kubernetes.io/part-of: epinio
+
+---
+# Cluster-scoped reads for capability probes + adoption discovery.
+# Narrow by design — install/epinio-mcp-broad-rbac.yaml adds cross-namespace
+# write verbs for the general adoption workflow.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: epinio-mcp
+  labels:
+    app.kubernetes.io/name: epinio-mcp
+rules:
+  # Read Epinio App CRDs (blobuid lookup for app_editing, adoption discovery)
+  - apiGroups: ["application.epinio.io"]
+    resources: ["apps", "services", "appcharts"]
+    verbs: ["get", "list", "watch"]
+  # SelfSubjectAccessReview — the MCP uses this to check its own RBAC
+  # as part of capability probing.
+  - apiGroups: ["authorization.k8s.io"]
+    resources: ["selfsubjectaccessreviews"]
+    verbs: ["create"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: epinio-mcp
+  labels:
+    app.kubernetes.io/name: epinio-mcp
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: epinio-mcp
+subjects:
+  - kind: ServiceAccount
+    name: epinio-mcp
+    namespace: epinio
+
+---
+# Namespace-scoped writes for self-reconciliation + self-adoption.
+# The MCP writes to its own Secrets (credentials, adoption metadata),
+# patches its own Deployment (rolling-restart on config change), and
+# creates/updates App CRDs in its own namespace.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: epinio-mcp-self
+  namespace: epinio
+  labels:
+    app.kubernetes.io/name: epinio-mcp
+rules:
+  - apiGroups: ["application.epinio.io"]
+    resources: ["apps"]
+    verbs: ["create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "create", "update", "patch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "patch"]
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get", "list", "patch"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["get", "list"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: epinio-mcp-self
+  namespace: epinio
+  labels:
+    app.kubernetes.io/name: epinio-mcp
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: epinio-mcp-self
+subjects:
+  - kind: ServiceAccount
+    name: epinio-mcp
+    namespace: epinio
+
+---
+# Server-level fallback identity. Per-request caller auth (bearer / basic via
+# Authorization header) overrides these values. Leave token fields empty to
+# use basic auth with Epinio's local password store.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: epinio-mcp-auth
+  namespace: epinio
+  labels:
+    app.kubernetes.io/name: epinio-mcp
+type: Opaque
+stringData:
+  # Basic auth against Epinio's local password store.
+  # EDIT ME: replace with real credentials for your cluster.
+  username: "admin"
+  password: "password"
+  # --- OR use OIDC refresh-token auth (leave basic auth empty if you do) ---
+  # token: ""
+  # refresh_token: ""
+  # token_endpoint: "https://auth.epinio.example.com/token"
+
+---
+# Optional: pre-seed S3 gateway credentials so the `app_editing` capability
+# works before running `enable_capability(name="app_editing")`. Leave empty
+# to have the MCP populate these when `enable_capability` creates the
+# underlying service instance.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: epinio-mcp-s3
+  namespace: epinio
+  labels:
+    app.kubernetes.io/name: epinio-mcp
+type: Opaque
+stringData:
+  endpoint: ""           # e.g. epinio-s3-gateway-seaweedfs-s3.epinio.svc.cluster.local:8333
+  bucket: "epinio"
+  access_key_id: ""
+  secret_access_key: ""
+  use_ssl: "false"
+
+---
+# Optional: uncomment + edit if the image is in a private registry.
+# Reference from the Deployment's imagePullSecrets below.
+# apiVersion: v1
+# kind: Secret
+# metadata:
+#   name: epinio-mcp-pull
+#   namespace: epinio
+# type: kubernetes.io/dockerconfigjson
+# data:
+#   .dockerconfigjson: BASE64_ENCODED_DOCKERCONFIGJSON
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: epinio-mcp
+  namespace: epinio
+  # Canonical labels — Epinio's label-based workload discovery uses these to
+  # connect the Deployment back to the App CRD below.
+  labels:
+    app.kubernetes.io/name: epinio-mcp
+    app.kubernetes.io/part-of: epinio
+    app.kubernetes.io/managed-by: epinio
+    app.kubernetes.io/component: application
+  annotations:
+    epinio.io/adopted: "true"
+    epinio.io/created-by: "kubectl"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: epinio-mcp
+      app.kubernetes.io/component: application
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: epinio-mcp
+        app.kubernetes.io/part-of: epinio
+        app.kubernetes.io/managed-by: epinio
+        app.kubernetes.io/component: application
+        # Identifies the primary container for `epinio app logs` / `exec`.
+        epinio.io/app-container: epinio-mcp
+        # Any stable string is fine — Epinio doesn't parse the format.
+        epinio.io/stage-id: "adopted"
+    spec:
+      serviceAccountName: epinio-mcp
+      # imagePullSecrets:
+      #   - name: epinio-mcp-pull
+      containers:
+        - name: epinio-mcp
+          # EDIT ME: pin to a released version.
+          image: ghcr.io/krumware/epinio-mcp:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: EPINIO_API_URL
+              # Adjust if Epinio is installed under a different service name
+              # or namespace. Common alternatives:
+              #   https://epinio-server.epinio.svc.cluster.local
+              #   http://epinio-server.epinio.svc.cluster.local
+              value: "https://epinio-server.epinio.svc.cluster.local"
+            - name: EPINIO_MCP_APP_NAME
+              value: "epinio-mcp"
+            - name: EPINIO_MCP_APP_NAMESPACE
+              value: "epinio"
+            - name: PORT
+              value: "8080"
+            # Auth — each reads from a key in epinio-mcp-auth. All optional;
+            # main.go picks an auth mode based on which are set.
+            - name: EPINIO_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: epinio-mcp-auth
+                  key: username
+                  optional: true
+            - name: EPINIO_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: epinio-mcp-auth
+                  key: password
+                  optional: true
+            - name: EPINIO_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: epinio-mcp-auth
+                  key: token
+                  optional: true
+            - name: EPINIO_REFRESH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: epinio-mcp-auth
+                  key: refresh_token
+                  optional: true
+            - name: EPINIO_TOKEN_ENDPOINT
+              valueFrom:
+                secretKeyRef:
+                  name: epinio-mcp-auth
+                  key: token_endpoint
+                  optional: true
+            # S3 gateway config — read by client/s3.go. Empty values mean
+            # "not configured"; the app_editing capability surfaces that
+            # via check_capabilities.
+            - name: S3_ENDPOINT
+              valueFrom:
+                secretKeyRef:
+                  name: epinio-mcp-s3
+                  key: endpoint
+                  optional: true
+            - name: S3_BUCKET
+              valueFrom:
+                secretKeyRef:
+                  name: epinio-mcp-s3
+                  key: bucket
+                  optional: true
+            - name: S3_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: epinio-mcp-s3
+                  key: access_key_id
+                  optional: true
+            - name: S3_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: epinio-mcp-s3
+                  key: secret_access_key
+                  optional: true
+            - name: S3_USE_SSL
+              valueFrom:
+                secretKeyRef:
+                  name: epinio-mcp-s3
+                  key: use_ssl
+                  optional: true
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: epinio-mcp
+  namespace: epinio
+  labels:
+    app.kubernetes.io/name: epinio-mcp
+    app.kubernetes.io/part-of: epinio
+    app.kubernetes.io/managed-by: epinio
+    app.kubernetes.io/component: application
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: epinio-mcp
+    app.kubernetes.io/component: application
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+
+---
+# Epinio App CRD. Metadata-only today (the REST API is the thing that
+# deploys), but the presence of this CRD plus the canonical labels on the
+# Deployment/Service makes the MCP visible in `epinio app list`, `show`,
+# `logs`, etc. The `epinio.io/adopted` annotation signals to MCP tooling
+# (and, eventually, to Epinio itself per EPINIOROADMAP-56) that
+# destructive write operations should be refused.
+apiVersion: application.epinio.io/v1
+kind: App
+metadata:
+  name: epinio-mcp
+  namespace: epinio
+  labels:
+    app.kubernetes.io/name: epinio-mcp
+    app.kubernetes.io/part-of: epinio
+    app.kubernetes.io/managed-by: epinio
+    app.kubernetes.io/component: application
+  annotations:
+    epinio.io/adopted: "true"
+    epinio.io/created-by: "kubectl"
+spec:
+  origin:
+    container: "ghcr.io/krumware/epinio-mcp:latest"
+  # Empty chartname signals adopted — no Helm release to render.
+  chartname: ""
+  # Any stable string; Epinio treats it as an opaque identifier.
+  stageid: "adopted"
+  routes: []
+  settings: {}
+
+---
+# Optional Ingress. Delete this whole block if you'll expose the MCP some
+# other way (Tailscale, internal-only, port-forward for local testing,
+# Rancher gateway, etc.).
+#
+# EDIT ME: replace epinio-mcp.example.com with your domain.
+#
+# apiVersion: networking.k8s.io/v1
+# kind: Ingress
+# metadata:
+#   name: epinio-mcp
+#   namespace: epinio
+#   labels:
+#     app.kubernetes.io/name: epinio-mcp
+#   annotations:
+#     cert-manager.io/cluster-issuer: letsencrypt
+# spec:
+#   ingressClassName: nginx
+#   rules:
+#     - host: epinio-mcp.example.com
+#       http:
+#         paths:
+#           - path: /
+#             pathType: Prefix
+#             backend:
+#               service:
+#                 name: epinio-mcp
+#                 port:
+#                   name: http
+#   tls:
+#     - hosts:
+#         - epinio-mcp.example.com
+#       secretName: epinio-mcp-tls

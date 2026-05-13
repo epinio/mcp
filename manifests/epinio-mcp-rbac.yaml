@@ -1,0 +1,35 @@
+# RBAC grant for the Epinio-managed application pod ServiceAccount.
+#
+# Needed by the `app_editing` capability so the MCP can read the
+# `spec.blobuid` field from Epinio Application CRDs and resolve a
+# deployed app's staging tarball in the S3 gateway.
+#
+# With the `standard` appchart, Epinio runs all app pods in the `epinio`
+# namespace as the shared ServiceAccount `epinio`. Binding the ClusterRole
+# to that SA grants the MCP pod read access to app CRDs without requiring
+# `standard-elevated` (which would mean deleting + recreating the app).
+#
+# If the MCP is moved to a different namespace or a custom appchart with
+# its own SA, update the `subjects` block to match.
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: epinio-mcp-app-reader
+rules:
+  - apiGroups: ["application.epinio.io"]
+    resources: ["apps"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: epinio-mcp-app-reader
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: epinio-mcp-app-reader
+subjects:
+  - kind: ServiceAccount
+    name: epinio
+    namespace: epinio
