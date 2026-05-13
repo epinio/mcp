@@ -149,6 +149,8 @@ Two install paths:
 
 ### `epinio push` (Epinio-managed)
 
+Ensure you have the Epinio CLI logged into your Epinio Instance.
+
 Epinio handles the lifecycle (push, logs, restart, scale). A `Taskfile.yml`
 at the repo root automates the full setup:
 
