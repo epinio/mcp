@@ -1,7 +1,7 @@
 # Multi-stage build for epinio-mcp.
 #
-# Build: docker build -f install/Dockerfile -t ghcr.io/krumware/epinio-mcp:<tag> .
-# Run:   docker run -p 8080:8080 -e EPINIO_API_URL=... ghcr.io/krumware/epinio-mcp:<tag>
+# Build: docker build -f install/Dockerfile -t ghcr.io/epinio/mcp:<tag> .
+# Run:   docker run -p 8080:8080 -e EPINIO_API_URL=... ghcr.io/epinio/mcp:<tag>
 #
 # The final image is distroless (nonroot), ~20MB. No shell, no package manager.
 # All runtime config comes from env vars — see install/epinio-mcp.yaml for the

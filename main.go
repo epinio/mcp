@@ -11,10 +11,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/krumware/epinio-mcp/client"
-	"github.com/krumware/epinio-mcp/tools"
+	"github.com/epinio/mcp/client"
+	"github.com/epinio/mcp/tools"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
+
+// version is the server version reported over MCP and on the health probes.
+// It defaults to "dev" and is overridden at build time via
+// -ldflags "-X main.version=<tag>" (see the Makefile and install/Dockerfile).
+var version = "dev"
 
 func main() {
 	apiURL := envOrDefault("EPINIO_API_URL", "https://epinio.example.com")
@@ -46,7 +51,7 @@ func main() {
 
 	impl := &mcp.Implementation{
 		Name:    "epinio-mcp",
-		Version: "0.6.0",
+		Version: version,
 	}
 
 	server := mcp.NewServer(impl, nil)

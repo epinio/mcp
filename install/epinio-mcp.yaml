@@ -220,7 +220,7 @@ spec:
       containers:
         - name: epinio-mcp
           # EDIT ME: pin to a released version.
-          image: ghcr.io/krumware/epinio-mcp:latest
+          image: ghcr.io/epinio/mcp:latest
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -367,7 +367,7 @@ metadata:
     epinio.io/created-by: "kubectl"
 spec:
   origin:
-    container: "ghcr.io/krumware/epinio-mcp:latest"
+    container: "ghcr.io/epinio/mcp:latest"
   # Empty chartname signals adopted — no Helm release to render.
   chartname: ""
   # Any stable string; Epinio treats it as an opaque identifier.

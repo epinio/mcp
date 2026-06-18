@@ -1,4 +1,4 @@
-module github.com/krumware/epinio-mcp
+module github.com/epinio/mcp
 
 go 1.25.0
 
