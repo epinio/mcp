@@ -163,7 +163,7 @@ type EnvVariable struct {
 
 // ConfigurationResponse is returned when listing configurations.
 type ConfigurationResponse struct {
-	Meta          Meta                    `json:"meta"`
+	Meta          Meta                      `json:"meta"`
 	Configuration ConfigurationShowResponse `json:"configuration"`
 }
 
@@ -194,14 +194,14 @@ type Service struct {
 
 // CatalogService describes an available service from the catalog.
 type CatalogService struct {
-	Meta             MetaLite          `json:"meta"`
-	Description      string            `json:"description"`
-	ShortDescription string            `json:"short_description"`
-	HelmChart        string            `json:"helm_chart"`
-	ChartVersion     string            `json:"chart_version"`
-	AppVersion       string            `json:"app_version"`
-	HelmRepo         HelmRepo          `json:"helm_repo"`
-	Settings         map[string]any    `json:"settings,omitempty"`
+	Meta             MetaLite       `json:"meta"`
+	Description      string         `json:"description"`
+	ShortDescription string         `json:"short_description"`
+	HelmChart        string         `json:"helm_chart"`
+	ChartVersion     string         `json:"chart_version"`
+	AppVersion       string         `json:"app_version"`
+	HelmRepo         HelmRepo       `json:"helm_repo"`
+	Settings         map[string]any `json:"settings,omitempty"`
 }
 
 // HelmRepo is a Helm repository reference.

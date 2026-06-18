@@ -8,7 +8,6 @@
 // discovery still finds them (list/show/logs/exec work), but the MCP's own
 // write tools refuse destructive operations on adopted apps — use kubectl
 // for lifecycle or run `release_app` to convert back to pure k8s.
-//
 package tools
 
 import (
@@ -17,7 +16,7 @@ import (
 	"log"
 	"strings"
 
-	"github.com/krumware/epinio-mcp/client"
+	"github.com/epinio/mcp/client"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"

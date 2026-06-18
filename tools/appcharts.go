@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/krumware/epinio-mcp/client"
+	"github.com/epinio/mcp/client"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -12,11 +12,11 @@ import (
 // client.AppChart but uses `map[string]any` for settings so the SDK's
 // JSON-schema reflection doesn't need to chase a nested struct type.
 type AppChartSummary struct {
-	Name             string         `json:"name"`
-	Description      string         `json:"description,omitempty"`
-	ShortDescription string         `json:"short_description,omitempty"`
-	HelmChart        string         `json:"helm_chart,omitempty"`
-	HelmRepo         string         `json:"helm_repo,omitempty"`
+	Name             string `json:"name"`
+	Description      string `json:"description,omitempty"`
+	ShortDescription string `json:"short_description,omitempty"`
+	HelmChart        string `json:"helm_chart,omitempty"`
+	HelmRepo         string `json:"helm_repo,omitempty"`
 	// Settings maps each setting name to its schema (type + constraints).
 	// Callers should consult this before setting `appchart` + `settings`
 	// on create_app / update_app / push_app to pass valid values.

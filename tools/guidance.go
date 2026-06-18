@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/krumware/epinio-mcp/client"
+	"github.com/epinio/mcp/client"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -113,13 +113,13 @@ func renderDeployGuide(language string) string {
 const bt = "`"
 
 var (
-	deployGuideCommon     = useBackticks(deployGuideCommonRaw)
-	deployGuideNode       = useBackticks(deployGuideNodeRaw)
-	deployGuideNext       = useBackticks(deployGuideNextRaw)
-	deployGuideGo         = useBackticks(deployGuideGoRaw)
-	deployGuidePython     = useBackticks(deployGuidePythonRaw)
-	pickAppchartBody      = useBackticks(pickAppchartBodyRaw)
-	pickBuilderBody       = useBackticks(pickBuilderBodyRaw)
+	deployGuideCommon       = useBackticks(deployGuideCommonRaw)
+	deployGuideNode         = useBackticks(deployGuideNodeRaw)
+	deployGuideNext         = useBackticks(deployGuideNextRaw)
+	deployGuideGo           = useBackticks(deployGuideGoRaw)
+	deployGuidePython       = useBackticks(deployGuidePythonRaw)
+	pickAppchartBody        = useBackticks(pickAppchartBodyRaw)
+	pickBuilderBody         = useBackticks(pickBuilderBodyRaw)
 	troubleshootStagingBody = useBackticks(troubleshootStagingBodyRaw)
 )
 

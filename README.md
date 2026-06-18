@@ -188,6 +188,6 @@ kubectl -n epinio rollout status deployment/epinio-mcp
 See [`install/README.md`](install/README.md) for RBAC details, upgrade,
 and uninstall.
 
-> **Image availability:** `ghcr.io/krumware/epinio-mcp` is published on
+> **Image availability:** `ghcr.io/epinio/mcp` is published on
 > release tags. Until the first tag lands, build locally:
 > `docker build -f install/Dockerfile -t <tag> .`

@@ -6,7 +6,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/krumware/epinio-mcp/client"
+	"github.com/epinio/mcp/client"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"

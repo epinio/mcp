@@ -72,7 +72,7 @@ func GetS3Client(ctx context.Context) (*S3Client, error) {
 		api := s3.New(s3.Options{
 			Region:       "us-east-1", // SeaweedFS ignores region but the SDK requires one
 			BaseEndpoint: aws.String(endpoint),
-			Credentials: credentials.NewStaticCredentialsProvider(ak, sk, ""),
+			Credentials:  credentials.NewStaticCredentialsProvider(ak, sk, ""),
 			UsePathStyle: true, // SeaweedFS doesn't do virtual-hosted-style
 		})
 		s3Client = &S3Client{API: api, Bucket: cfg.Bucket, Config: cfg}

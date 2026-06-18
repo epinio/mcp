@@ -21,12 +21,12 @@ import (
 
 // Client communicates with the Epinio API server.
 type Client struct {
-	BaseURL      string
-	Username     string
-	Password     string
-	Token        string
-	tokenSource  oauth2.TokenSource
-	httpClient   *http.Client
+	BaseURL     string
+	Username    string
+	Password    string
+	Token       string
+	tokenSource oauth2.TokenSource
+	httpClient  *http.Client
 }
 
 // tlsConfig returns a TLS config. Verification is skipped by default because
@@ -45,9 +45,9 @@ func tlsTransport() *http.Transport {
 func New(baseURL, username, password string) *Client {
 	baseURL = strings.TrimRight(baseURL, "/")
 	return &Client{
-		BaseURL:  baseURL,
-		Username: username,
-		Password: password,
+		BaseURL:    baseURL,
+		Username:   username,
+		Password:   password,
 		httpClient: &http.Client{Transport: tlsTransport()},
 	}
 }
