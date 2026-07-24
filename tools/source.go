@@ -27,7 +27,6 @@ type GetAppSourceInput struct {
 type GetAppSourceOutput struct {
 	Namespace string `json:"namespace"`
 	Name      string `json:"name"`
-	BlobUID   string `json:"blobuid"`
 	// Tarball is the raw staging tarball as base64 when Extract=false.
 	Tarball string `json:"tarball,omitempty"`
 	// Files is the extracted file tree when Extract=true.
@@ -47,52 +46,38 @@ type AppFileEntry struct {
 type ListAppFilesOutput struct {
 	Namespace string         `json:"namespace"`
 	Name      string         `json:"name"`
-	BlobUID   string         `json:"blobuid"`
 	Files     []AppFileEntry `json:"files"`
 	TotalSize int64          `json:"total_size"`
 	FileCount int            `json:"file_count"`
 }
 
+// RegisterAppSourceTools registers the source-retrieval tools. These wire
+// directly to Epinio's GET .../applications/:app/source endpoint — the server
+// streams the staging tarball from S3 on the caller's behalf, so the MCP needs
+// no Kubernetes or S3 access of its own.
 func RegisterAppSourceTools(server *mcp.Server, c *client.Client) {
 	mcp.AddTool(
 		server,
 		&mcp.Tool{
 			Name:        "get_app_source",
 			Annotations: &mcp.ToolAnnotations{Title: "Get App Source"},
-			Description: "Retrieve the source of a deployed Epinio application. " +
-				"Resolves the app's blobuid from its Kubernetes CRD, then fetches " +
-				"the staging tarball from the Epinio S3 gateway. Set extract=true " +
-				"to get a flat file map instead of the raw tarball. Gated by the " +
-				"app_editing capability.",
+			Description: "Retrieve the source of a deployed Epinio application via " +
+				"the Epinio API. Set extract=true to get a flat file map instead of " +
+				"the raw tarball. The app must have been staged at least once; an " +
+				"app with no stored source returns an error.",
 		},
 		func(
 			ctx context.Context,
 			req *mcp.CallToolRequest,
 			input GetAppSourceInput,
 		) (*mcp.CallToolResult, GetAppSourceOutput, error) {
-			if err := requireCapability(ctx, c, "app_editing", ProbeContext{}); err != nil {
-				return nil, GetAppSourceOutput{}, err
-			}
-			k, err := client.GetKubeClient()
-			if err != nil {
-				return nil, GetAppSourceOutput{}, fmt.Errorf("kubernetes client: %w", err)
-			}
-			s, err := client.GetS3Client(ctx)
-			if err != nil {
-				return nil, GetAppSourceOutput{}, fmt.Errorf("s3 client: %w", err)
-			}
-			blobuid, err := k.AppBlobUID(ctx, input.Namespace, input.Name)
+			body, err := c.GetAppSource(input.Namespace, input.Name)
 			if err != nil {
 				return nil, GetAppSourceOutput{}, err
-			}
-			body, _, err := s.GetObject(ctx, blobuid)
-			if err != nil {
-				return nil, GetAppSourceOutput{}, fmt.Errorf("fetch blob %q: %w", blobuid, err)
 			}
 			out := GetAppSourceOutput{
 				Namespace: input.Namespace,
 				Name:      input.Name,
-				BlobUID:   blobuid,
 			}
 			if input.Extract {
 				files, err := extractTar(body)
@@ -115,32 +100,16 @@ func RegisterAppSourceTools(server *mcp.Server, c *client.Client) {
 			Description: "List the files in a deployed app's source tarball with " +
 				"their sizes. Much cheaper (tokens-wise) than get_app_source for " +
 				"'tell me about this app' style questions — returns paths + sizes " +
-				"only, no file contents. Gated by the app_editing capability since " +
-				"it needs the same blobuid + S3 lookup.",
+				"only, no file contents.",
 		},
 		func(
 			ctx context.Context,
 			req *mcp.CallToolRequest,
 			input ListAppFilesInput,
 		) (*mcp.CallToolResult, ListAppFilesOutput, error) {
-			if err := requireCapability(ctx, c, "app_editing", ProbeContext{}); err != nil {
-				return nil, ListAppFilesOutput{}, err
-			}
-			k, err := client.GetKubeClient()
-			if err != nil {
-				return nil, ListAppFilesOutput{}, fmt.Errorf("kubernetes client: %w", err)
-			}
-			s, err := client.GetS3Client(ctx)
-			if err != nil {
-				return nil, ListAppFilesOutput{}, fmt.Errorf("s3 client: %w", err)
-			}
-			blobuid, err := k.AppBlobUID(ctx, input.Namespace, input.Name)
+			body, err := c.GetAppSource(input.Namespace, input.Name)
 			if err != nil {
 				return nil, ListAppFilesOutput{}, err
-			}
-			body, _, err := s.GetObject(ctx, blobuid)
-			if err != nil {
-				return nil, ListAppFilesOutput{}, fmt.Errorf("fetch blob %q: %w", blobuid, err)
 			}
 			entries, total, err := listTarEntries(body)
 			if err != nil {
@@ -149,7 +118,6 @@ func RegisterAppSourceTools(server *mcp.Server, c *client.Client) {
 			return nil, ListAppFilesOutput{
 				Namespace: input.Namespace,
 				Name:      input.Name,
-				BlobUID:   blobuid,
 				Files:     entries,
 				TotalSize: total,
 				FileCount: len(entries),
@@ -163,18 +131,12 @@ func RegisterAppSourceTools(server *mcp.Server, c *client.Client) {
 // header for each entry and seeks past the file data — the returned payload
 // stays tiny regardless of tarball size.
 func listTarEntries(raw []byte) ([]AppFileEntry, int64, error) {
-	var r io.Reader = bytes.NewReader(raw)
-	if len(raw) >= 2 && raw[0] == 0x1f && raw[1] == 0x8b {
-		gz, err := gzip.NewReader(bytes.NewReader(raw))
-		if err != nil {
-			return nil, 0, fmt.Errorf("gzip header: %w", err)
-		}
-		defer gz.Close()
-		r = gz
+	tr, err := tarReader(raw)
+	if err != nil {
+		return nil, 0, err
 	}
 	var total int64
 	var out []AppFileEntry
-	tr := tar.NewReader(r)
 	for {
 		hdr, err := tr.Next()
 		if errors.Is(err, io.EOF) {
@@ -183,7 +145,7 @@ func listTarEntries(raw []byte) ([]AppFileEntry, int64, error) {
 		if err != nil {
 			return nil, 0, fmt.Errorf("tar header: %w", err)
 		}
-		if hdr.Typeflag != tar.TypeReg && hdr.Typeflag != tar.TypeRegA { //nolint:staticcheck
+		if hdr.Typeflag != tar.TypeReg {
 			continue
 		}
 		out = append(out, AppFileEntry{Path: hdr.Name, Size: hdr.Size})
@@ -196,18 +158,11 @@ func listTarEntries(raw []byte) ([]AppFileEntry, int64, error) {
 // returns a map of file path to contents. Skips directories, symlinks, and
 // other non-regular entries.
 func extractTar(raw []byte) (map[string]string, error) {
-	var r io.Reader = bytes.NewReader(raw)
-	if len(raw) >= 2 && raw[0] == 0x1f && raw[1] == 0x8b {
-		gz, err := gzip.NewReader(bytes.NewReader(raw))
-		if err != nil {
-			return nil, fmt.Errorf("gzip header: %w", err)
-		}
-		defer gz.Close()
-		r = gz
+	tr, err := tarReader(raw)
+	if err != nil {
+		return nil, err
 	}
-
 	files := make(map[string]string)
-	tr := tar.NewReader(r)
 	for {
 		hdr, err := tr.Next()
 		if errors.Is(err, io.EOF) {
@@ -216,7 +171,7 @@ func extractTar(raw []byte) (map[string]string, error) {
 		if err != nil {
 			return nil, fmt.Errorf("tar header: %w", err)
 		}
-		if hdr.Typeflag != tar.TypeReg && hdr.Typeflag != tar.TypeRegA { //nolint:staticcheck // TypeRegA is older archives
+		if hdr.Typeflag != tar.TypeReg {
 			continue
 		}
 		buf, err := io.ReadAll(tr)
@@ -226,4 +181,18 @@ func extractTar(raw []byte) (map[string]string, error) {
 		files[hdr.Name] = string(buf)
 	}
 	return files, nil
+}
+
+// tarReader returns a *tar.Reader over raw, transparently handling a gzip
+// wrapper (the staging blob may be stored gzip-compressed or plain).
+func tarReader(raw []byte) (*tar.Reader, error) {
+	var r io.Reader = bytes.NewReader(raw)
+	if len(raw) >= 2 && raw[0] == 0x1f && raw[1] == 0x8b {
+		gz, err := gzip.NewReader(bytes.NewReader(raw))
+		if err != nil {
+			return nil, fmt.Errorf("gzip header: %w", err)
+		}
+		r = gz
+	}
+	return tar.NewReader(r), nil
 }

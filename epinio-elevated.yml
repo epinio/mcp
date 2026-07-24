@@ -1,0 +1,33 @@
+name: epinio-mcp
+
+# Elevated install. Turns on the opt-in capabilities that reach past the Epinio
+# API directly into Kubernetes (workload adoption, capability self-checks). Run
+# `make elevated-setup` first — it registers the elevated appchart and pushes
+# with this manifest.
+#
+# NOTE: source retrieval (get_app_source / list_app_files) is NOT elevated — it
+# uses Epinio's GET .../source API and is always available in the core install.
+configuration:
+  instances: 1
+  # standard-elevated grants this app a per-app ServiceAccount with read access
+  # to apps.application.epinio.io CRDs — needed by the adoption tools and the
+  # capability self-checks. `make cluster-prep` applies the chart once per
+  # cluster (manifests/standard-elevated-appchart.yaml).
+  appchart: standard-elevated
+  environment:
+    # EDIT before pushing — set these to your Epinio cluster values
+    EPINIO_API_URL: "https://epinio.192.168.49.2.sslip.io"
+    EPINIO_USERNAME: "admin"
+    EPINIO_PASSWORD: "password"
+    # Read-only elevated tier: source retrieval + capability reporting.
+    EPINIO_MCP_ELEVATED: "true"
+    # Read-write adoption tier (broad RBAC — adopt/reconcile/release). Off by
+    # default; uncomment only if you need to adopt kubectl-managed workloads.
+    # EPINIO_MCP_ELEVATED_ADOPTION: "true"
+    # Self-identity — used by the capability self-checks. APP_NAMESPACE must
+    # match the namespace you deploy into (the Makefile NAMESPACE var, default mcp).
+    EPINIO_MCP_APP_NAME: "epinio-mcp"
+    EPINIO_MCP_APP_NAMESPACE: "mcp"
+
+staging:
+  builder: "paketobuildpacks/builder-jammy-full:0.3.606"

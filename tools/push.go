@@ -76,11 +76,13 @@ func buildTarGz(files map[string]string) (io.Reader, error) {
 			parts := strings.Split(dir, "/")
 			for i := range parts {
 				dirPath := strings.Join(parts[:i+1], "/") + "/"
-				tw.WriteHeader(&tar.Header{
+				if err := tw.WriteHeader(&tar.Header{
 					Name:     dirPath,
 					Typeflag: tar.TypeDir,
 					Mode:     0755,
-				})
+				}); err != nil {
+					return nil, fmt.Errorf("write tar dir header for %s: %w", dirPath, err)
+				}
 			}
 		}
 

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/epinio/mcp/client"
+	"github.com/epinio/mcp/elevated"
 	"github.com/epinio/mcp/tools"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -54,19 +55,40 @@ func main() {
 		Version: version,
 	}
 
+	// Opt-in elevated tiers. Default off — the beta is a pure Epinio-API MCP.
+	// EPINIO_MCP_ELEVATED enables the read-only tier (capability reporting +
+	// log-stream connection info), EPINIO_MCP_ELEVATED_ADOPTION the read-write
+	// adoption tier. Both reach past the Epinio API into Kubernetes and require
+	// the standard-elevated appchart's RBAC — see the install manifests.
+	enableElevated := envBool("EPINIO_MCP_ELEVATED", false)
+	enableAdoption := envBool("EPINIO_MCP_ELEVATED_ADOPTION", false)
+	log.Printf("tool tiers: core=on elevated=%t adoption=%t", enableElevated, enableAdoption)
+
+	// registerTools wires the core Epinio-API tools plus whichever elevated
+	// tiers are enabled. Used for both the server-level client and each
+	// per-request client so the exposed surface is identical either way.
+	registerTools := func(s *mcp.Server, cl *client.Client) {
+		tools.RegisterCore(s, cl)
+		if enableElevated {
+			elevated.RegisterReadOnly(s, cl)
+		}
+		if enableAdoption {
+			elevated.RegisterAdoption(s, cl)
+		}
+	}
+
 	server := mcp.NewServer(impl, nil)
-	tools.RegisterAll(server, c)
+	registerTools(server, c)
 
 	mcpHandler := mcp.NewStreamableHTTPHandler(func(r *http.Request) *mcp.Server {
 		// Per-request auth: forward whichever credential the caller sent to
 		// a dedicated Epinio client for this session, so all tool calls
 		// inherit the caller's identity. Falls back to server-level env-var
-		// auth when no header is present (e.g. the Rancher AI agent using
-		// "None" authentication).
+		// auth when no Authorization header is present.
 		if authHeader := r.Header.Get("Authorization"); authHeader != "" {
 			if perReqClient := perRequestClient(apiURL, authHeader); perReqClient != nil {
 				perReqServer := mcp.NewServer(impl, nil)
-				tools.RegisterAll(perReqServer, perReqClient)
+				registerTools(perReqServer, perReqClient)
 				return perReqServer
 			}
 		}
@@ -76,6 +98,14 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", healthzHandler(impl.Version))
 	mux.HandleFunc("/readyz", readyzHandler(impl.Version, c))
+	// OAuth/OIDC discovery. This server authenticates by forwarding the caller's
+	// Authorization header (or its own env credentials) to Epinio — it is not an
+	// OAuth authorization server. MCP clients probe /.well-known/oauth-* before
+	// connecting; answer those with a clean 404 so a well-behaved client
+	// concludes "no OAuth required" and connects directly. Without this the
+	// probes fall through to the MCP handler below, which rejects them as
+	// malformed JSON-RPC and breaks the client's OAuth error handling.
+	mux.HandleFunc("/.well-known/", http.NotFound)
 	// Everything else (including the MCP Streamable HTTP paths) falls through
 	// to the MCP handler, optionally wrapped with request logging.
 	mux.Handle("/", withRequestLogging(mcpHandler))
@@ -137,59 +167,16 @@ func withRequestLogging(next http.Handler) http.Handler {
 		authHeader := r.Header.Get("Authorization")
 		summary := summarizeAuthHeader(authHeader)
 
-		// Also capture Rancher-specific headers some agent managers use to
-		// convey their own identity/context alongside (or instead of) the
-		// standard Authorization header. R_token is the Rancher-issued
-		// bearer; R_url is the Rancher base URL. Underscores in header
-		// names are sometimes stripped by proxies — we check the hyphenated
-		// variants too so we log whichever makes it through.
-		rTok := firstNonEmpty(r.Header.Get("R_token"), r.Header.Get("R-Token"))
-		rURL := firstNonEmpty(r.Header.Get("R_url"), r.Header.Get("R-Url"), r.Header.Get("R-URL"))
-		rancherExtra := summarizeRancherHeaders(rTok, rURL)
-
 		// Capture the response status so we can log it.
 		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(rec, r)
 
 		log.Printf(
-			"mcp %s %s auth=[%s]%s status=%d dur=%s ua=%q",
-			r.Method, r.URL.Path, summary, rancherExtra, rec.status, time.Since(start).Round(time.Millisecond),
+			"mcp %s %s auth=[%s] status=%d dur=%s ua=%q",
+			r.Method, r.URL.Path, summary, rec.status, time.Since(start).Round(time.Millisecond),
 			truncate(r.Header.Get("User-Agent"), 40),
 		)
 	})
-}
-
-// summarizeRancherHeaders returns a " rancher={...}" suffix (with leading
-// space) when either R_token or R_url was sent; empty string otherwise.
-// Never prints the full R_token value.
-func summarizeRancherHeaders(rTok, rURL string) string {
-	if rTok == "" && rURL == "" {
-		return ""
-	}
-	var parts []string
-	if rTok != "" {
-		kind := "opaque"
-		switch {
-		case looksLikeJWT(rTok):
-			kind = "jwt"
-		case kubeconfigTokenRE.MatchString(rTok):
-			kind = "rancher-kubeconfig"
-		}
-		parts = append(parts, fmt.Sprintf("R_token=%s len=%d %s", kind, len(rTok), fingerprint(rTok)))
-	}
-	if rURL != "" {
-		parts = append(parts, fmt.Sprintf("R_url=%s", truncate(rURL, 80)))
-	}
-	return " rancher=[" + strings.Join(parts, " ") + "]"
-}
-
-func firstNonEmpty(vals ...string) string {
-	for _, v := range vals {
-		if v != "" {
-			return v
-		}
-	}
-	return ""
 }
 
 type statusRecorder struct {
@@ -395,4 +382,20 @@ func envOrDefault(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// envBool reads a boolean-ish env var. Truthy: 1/true/yes/on (any case).
+// Anything else (including unset) returns the fallback for unset and false
+// for an explicit non-truthy value.
+func envBool(key string, fallback bool) bool {
+	v := strings.ToLower(strings.TrimSpace(os.Getenv(key)))
+	if v == "" {
+		return fallback
+	}
+	switch v {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
 }

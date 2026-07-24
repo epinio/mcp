@@ -1,11 +1,8 @@
-package tools
+package elevated
 
 import (
 	"context"
-	"encoding/base64"
-	"encoding/json"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/epinio/mcp/client"
@@ -130,33 +127,4 @@ func logStreamConnectionInfo(c *client.Client, input GetConnectionInfoInput, tar
 		out.Note = "Staging log stream for stage " + input.StageID + ". " + out.Note
 	}
 	return out, nil
-}
-
-// jwtExpiry pulls the `exp` claim out of a JWT without verifying the
-// signature. For display/TTL hints only — the upstream still enforces
-// whatever validation it wants.
-func jwtExpiry(token string) *time.Time {
-	parts := strings.Split(token, ".")
-	if len(parts) != 3 {
-		return nil
-	}
-	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil {
-		// Some encoders leave padding; try the permissive form.
-		payload, err = base64.RawStdEncoding.DecodeString(parts[1])
-		if err != nil {
-			return nil
-		}
-	}
-	var claims struct {
-		Exp int64 `json:"exp"`
-	}
-	if err := json.Unmarshal(payload, &claims); err != nil {
-		return nil
-	}
-	if claims.Exp == 0 {
-		return nil
-	}
-	t := time.Unix(claims.Exp, 0).UTC()
-	return &t
 }

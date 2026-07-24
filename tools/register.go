@@ -5,8 +5,12 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// RegisterAll registers all Epinio tool groups on the given server.
-func RegisterAll(server *mcp.Server, c *client.Client) {
+// RegisterCore registers the core Epinio tool groups — everything that wires
+// purely to the Epinio REST API, running as the caller's identity. The
+// elevated, opt-in capabilities (direct Kubernetes access) live in the
+// elevated package and are registered separately by main when explicitly
+// enabled via the EPINIO_MCP_ELEVATED* flags.
+func RegisterCore(server *mcp.Server, c *client.Client) {
 	RegisterInfoTools(server, c)
 	RegisterNamespaceTools(server, c)
 	RegisterAppTools(server, c)
@@ -16,11 +20,8 @@ func RegisterAll(server *mcp.Server, c *client.Client) {
 	RegisterLogTools(server, c)
 	RegisterPushTools(server, c)
 	RegisterCloneTools(server, c)
-	RegisterCapabilityTools(server, c)
 	RegisterAppSourceTools(server, c)
-	RegisterConnectionInfoTools(server, c)
 	RegisterAppChartTools(server, c)
 	RegisterBuilderTools(server, c)
 	RegisterGuidanceTools(server, c)
-	RegisterAdoptionTools(server, c)
 }

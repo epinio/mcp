@@ -19,61 +19,65 @@
 - **Language:** Go 1.25
 - **MCP SDK:** `github.com/modelcontextprotocol/go-sdk` (official, v1.4.1)
 - **Transport:** Streamable HTTP; `/healthz` + `/readyz` sidecar via `http.ServeMux`
-- **Epinio API client:** custom, in `client/` — REST + WebSocket (logs)
-- **AWS S3 SDK:** `github.com/aws/aws-sdk-go-v2/...` (for `app_editing` capability — reads blobs from the SeaweedFS gateway)
-- **Kubernetes client:** `k8s.io/client-go` — dynamic CRD client for Epinio Application reads, typed client for `SelfSubjectAccessReview`
+- **Epinio API client:** custom, in `client/` — REST + WebSocket (logs). Pure Epinio API, no cloud/k8s deps.
+- **Kubernetes client:** `k8s.io/client-go` (in `elevated/` only) — dynamic CRD client + typed client for `SelfSubjectAccessReview`, used by the opt-in adoption tier. The core server has no Kubernetes or cloud SDK dependencies.
 - **Target Platform:** Epinio on Kubernetes (Rancher Desktop or minikube for local dev; any Epinio-capable cluster for staging)
 
 ## Project Structure
 
+The server is split into a pure-Epinio-API **core** and an opt-in **elevated**
+package that reaches directly into Kubernetes. The core has no k8s/cloud deps.
+
 ```text
 epinio-mcp/
-├── main.go                  # Server setup; /healthz + /readyz + MCP Streamable HTTP
-├── client/
-│   ├── client.go            # Epinio REST + WS client, OIDC refresh, authtoken helper
-│   ├── types.go             # Request/response types mirroring Epinio models
-│   ├── k8s.go               # In-cluster K8s client (dynamic CRD reads + SSAR)
-│   └── s3.go                # aws-sdk-go-v2 wrapper for the Epinio s3-gateway
-├── tools/
-│   ├── register.go          # RegisterAll fan-out
+├── main.go                  # Server setup; /healthz + /readyz + MCP Streamable HTTP;
+│                            #   flag-gated registration of the elevated tiers
+├── client/                  # Pure Epinio REST + WS client (no k8s, no cloud SDKs)
+│   ├── client.go            # REST + WS client, OIDC refresh, authtoken, GetAppSource
+│   └── types.go             # Request/response types mirroring Epinio models
+├── tools/                   # Core tools — wire only to the Epinio API
+│   ├── register.go          # RegisterCore fan-out
+│   ├── guard.go             # AppMutationGuard seam (elevated adoption injects the real guard)
 │   ├── info.go              # epinio_info
 │   ├── namespaces.go        # namespaces
 │   ├── apps.go              # list/show/create/delete/restart/scale/update
-│   │                        #   (show_app carries adopted/advisory decoration;
-│   │                        #    write tools gated by EnsureNotAdopted)
+│   │                        #   (mutating tools consult appMutationGuard)
 │   ├── push.go              # push_app / upload_and_stage / deploy_staged
+│   ├── source.go            # get_app_source / list_app_files (via GET .../source API)
 │   ├── logs.go              # app_logs
 │   ├── env.go               # env vars
-│   ├── configurations.go    # configurations + bindings (adopted-mode guarded)
+│   ├── configurations.go    # configurations + bindings
 │   ├── services.go          # services + catalog (list/show)
-│   ├── clone.go             # manifest + clone
-│   ├── capabilities.go      # Capability model + check/enable + requireCapability gate
-│   │                        #   (S3AccessReq, SelfAdoptionReq, self_adoption)
-│   ├── app_source.go        # get_app_source / list_app_files (gated by app_editing)
-│   ├── adoption.go          # adopt_app / reconcile_app / release_app + EnsureNotAdopted
+│   ├── clone.go             # get_app_manifest + clone_app
 │   ├── appcharts.go         # list_appcharts / show_appchart
 │   ├── builders.go          # list_builders
-│   ├── guidance.go          # MCP Prompts + get_build_guidance
-│   └── connection_info.go   # get_connection_info (broker pattern)
-├── install/                  # kubectl apply install path (alternative)
+│   └── guidance.go          # MCP Prompts + get_build_guidance
+├── elevated/                # Opt-in tiers (EPINIO_MCP_ELEVATED*) — direct Kubernetes
+│   ├── register.go          # RegisterReadOnly + RegisterAdoption (+ guard injection)
+│   ├── kube.go              # In-cluster K8s client (dynamic CRD + SSAR + workload patch)
+│   ├── capabilities.go      # Capability model + check/enable (log_streaming, self_adoption)
+│   ├── connection_info.go   # get_connection_info (broker pattern)
+│   └── adoption.go          # adopt_app / reconcile_app / release_app + EnsureNotAdopted
+├── Makefile                 # Single tooling entry point: build/test/lint + install targets
+├── install/                  # kubectl apply install path (alternative escape hatch)
 │   ├── Dockerfile           # Multi-stage Go → distroless-nonroot
 │   ├── epinio-mcp.yaml      # One-shot manifest: SA + RBAC + Secrets + Deployment + Service + App CRD
-│   ├── epinio-mcp-broad-rbac.yaml  # Optional: cluster-wide write verbs for cross-namespace adoption
-│   └── README.md            # Install/bootstrap/upgrade/uninstall flow
-├── .github/workflows/
-│   └── docker-publish.yml   # Build + publish to ghcr.io on tag/main
-├── manifests/                # Pre-requisites for `epinio push` install
-│   ├── chart-server.yaml    # nginx pod serving the custom Helm chart
+│   └── epinio-mcp-broad-rbac.yaml  # Optional: cluster-wide write verbs for cross-namespace adoption
+├── manifests/                # Cluster prereqs for the elevated install (make cluster-prep)
+│   ├── chart-server.yaml    # pod serving the custom Helm chart
 │   ├── epinio-mcp-rbac.yaml
-│   ├── standard-elevated-appchart.yaml  # AppChart with elevated RBAC for source retrieval
-│   └── s3-gateway-catalog-entry.yaml    # Epinio catalog entry for the S3 gateway
+│   └── standard-elevated-appchart.yaml  # AppChart with elevated RBAC (adoption)
 ├── appcharts/                # Custom AppChart source (standard-elevated)
 │   └── standard-elevated/
-├── epinio.yml               # Epinio push deploy config (primary install path)
+├── epinio.yml               # Core push deploy config (standard appchart)
+├── epinio-elevated.yml      # Elevated push deploy config (standard-elevated + flags)
 ├── .epinioignore            # Excludes build artifacts + .git/ from push
+├── LICENSE                  # Apache-2.0
 ├── AGENTS.md                # This file
-└── README.md                # Project overview and docs
+└── README.md                # Project overview; links to docs.epinio.io
 ```
+
+(CI workflows under `.github/workflows/` are still to be added.)
 
 ## Epinio API Patterns
 
@@ -116,21 +120,27 @@ Epinio uses Dex as its IDP. Browser apps authenticate via OIDC Authorization Cod
 
 ## Capability Model
 
-Optional features that depend on external infrastructure (S3 gateway, K8s
-RBAC, Dex config, etc.) are gated via the `Capability` / `Requirement` model
-in `tools/capabilities.go`. Tools that need extras (e.g. `get_app_source`)
-call `requireCapability(ctx, c, "app_editing", ...)` at the top of their
-handler — returns a structured error if the prereqs aren't satisfied.
+The opt-in elevated tier uses a `Capability` / `Requirement` model in
+`elevated/capabilities.go` to report and fulfill readiness of features that
+depend on cluster infrastructure (K8s RBAC, Dex config, log-stream ingress).
+It registers only when `EPINIO_MCP_ELEVATED` is set.
+
+Current capabilities:
+- **`log_streaming`** — advertises WebSocket reachability for live log tailing
+- **`self_adoption`** — the MCP's own App CRD is complete and adopted
+
+Source retrieval (`get_app_source` / `list_app_files`) is **not** a gated
+capability. As of Epinio 1.14.1 it wires to the `GET .../source` API and is a
+plain core tool — no S3, no K8s, no elevated RBAC.
 
 - **`check_capabilities`** — pure diagnostic (safe, read-only)
-- **`enable_capability`** — invokes each requirement's `Fulfill` path (creates
-  service instances, binds configurations) when possible; reports
-  `needs_admin` for anything outside the MCP's auth envelope
+- **`enable_capability`** — invokes each requirement's `Fulfill` path when
+  possible; reports `needs_admin` for anything outside the MCP's auth envelope
 - **`get_connection_info`** — broker pattern: for capabilities whose backing
-  service supports direct-browser connections (currently `log_streaming`),
-  hands back a ready-to-dial URL with a short-lived auth token embedded
+  service supports direct connections (currently `log_streaming`), hands back a
+  ready-to-dial URL with a short-lived auth token embedded
 
-The capability types and requirement checks are implemented in `tools/capabilities.go`.
+The capability types and requirement checks live in `elevated/capabilities.go`.
 
 ## Staging Status Signal
 

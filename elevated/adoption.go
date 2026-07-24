@@ -8,13 +8,12 @@
 // discovery still finds them (list/show/logs/exec work), but the MCP's own
 // write tools refuse destructive operations on adopted apps — use kubectl
 // for lifecycle or run `release_app` to convert back to pure k8s.
-package tools
+package elevated
 
 import (
 	"context"
 	"fmt"
 	"log"
-	"strings"
 
 	"github.com/epinio/mcp/client"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -130,7 +129,7 @@ func adoptAppHandler(_ *client.Client) func(context.Context, *mcp.CallToolReques
 			appName = input.DeploymentName
 		}
 
-		k, err := client.GetKubeClient()
+		k, err := GetKubeClient()
 		if err != nil {
 			return nil, AdoptAppOutput{}, fmt.Errorf("kubernetes client: %w", err)
 		}
@@ -141,8 +140,8 @@ func adoptAppHandler(_ *client.Client) func(context.Context, *mcp.CallToolReques
 		}
 
 		image := primaryContainerImage(dep.Spec.Template.Spec.Containers)
-		labels := client.CanonicalLabels(appName, input.Namespace)
-		annotations := map[string]string{client.EpinioAdoptedAnnotation: "true"}
+		labels := CanonicalLabels(appName, input.Namespace)
+		annotations := map[string]string{EpinioAdoptedAnnotation: "true"}
 		podLabels := mergeMaps(labels, map[string]string{
 			"epinio.io/app-container": appName,
 			"epinio.io/stage-id":      "adopted",
@@ -196,7 +195,7 @@ func reconcileAppHandler(_ *client.Client) func(context.Context, *mcp.CallToolRe
 		if input.Namespace == "" || input.Name == "" {
 			return nil, ReconcileAppOutput{}, fmt.Errorf("namespace and name are required")
 		}
-		k, err := client.GetKubeClient()
+		k, err := GetKubeClient()
 		if err != nil {
 			return nil, ReconcileAppOutput{}, fmt.Errorf("kubernetes client: %w", err)
 		}
@@ -213,8 +212,8 @@ func reconcileAppHandler(_ *client.Client) func(context.Context, *mcp.CallToolRe
 		}
 		observedImage := primaryContainerImage(dep.Spec.Template.Spec.Containers)
 
-		labels := client.CanonicalLabels(input.Name, input.Namespace)
-		annotations := map[string]string{client.EpinioAdoptedAnnotation: "true"}
+		labels := CanonicalLabels(input.Name, input.Namespace)
+		annotations := map[string]string{EpinioAdoptedAnnotation: "true"}
 		serviceName := discoverServiceForDeployment(ctx, k, input.Namespace, dep.Spec.Selector.MatchLabels)
 		routes := deriveRoutes(ctx, k, input.Namespace, serviceName)
 
@@ -222,7 +221,7 @@ func reconcileAppHandler(_ *client.Client) func(context.Context, *mcp.CallToolRe
 		currentImage, _, _ := unstructured.NestedString(app.Object, "spec", "imageurl")
 		currentContainer, _, _ := unstructured.NestedString(app.Object, "spec", "origin", "container")
 		currentRoutes, _, _ := unstructured.NestedStringSlice(app.Object, "spec", "routes")
-		currentAnnotated := app.GetAnnotations()[client.EpinioAdoptedAnnotation] == "true"
+		currentAnnotated := app.GetAnnotations()[EpinioAdoptedAnnotation] == "true"
 
 		var changes []string
 		if currentImage != observedImage {
@@ -235,7 +234,7 @@ func reconcileAppHandler(_ *client.Client) func(context.Context, *mcp.CallToolRe
 			changes = append(changes, fmt.Sprintf("spec.routes: %v → %v", currentRoutes, routes))
 		}
 		if !currentAnnotated {
-			changes = append(changes, fmt.Sprintf("annotations[%s]: set to \"true\"", client.EpinioAdoptedAnnotation))
+			changes = append(changes, fmt.Sprintf("annotations[%s]: set to \"true\"", EpinioAdoptedAnnotation))
 		}
 
 		out := ReconcileAppOutput{
@@ -271,7 +270,7 @@ func releaseAppHandler(_ *client.Client) func(context.Context, *mcp.CallToolRequ
 		if input.Namespace == "" || input.Name == "" {
 			return nil, ReleaseAppOutput{}, fmt.Errorf("namespace and name are required")
 		}
-		k, err := client.GetKubeClient()
+		k, err := GetKubeClient()
 		if err != nil {
 			return nil, ReleaseAppOutput{}, fmt.Errorf("kubernetes client: %w", err)
 		}
@@ -282,7 +281,7 @@ func releaseAppHandler(_ *client.Client) func(context.Context, *mcp.CallToolRequ
 			"app.kubernetes.io/managed-by",
 			"app.kubernetes.io/component",
 		}
-		annotationKeys := []string{client.EpinioAdoptedAnnotation}
+		annotationKeys := []string{EpinioAdoptedAnnotation}
 
 		// Deployment is conventionally named like the app. Strip Epinio
 		// metadata; the Deployment keeps running under whatever labels the
@@ -327,7 +326,7 @@ func releaseAppHandler(_ *client.Client) func(context.Context, *mcp.CallToolRequ
 // outside a cluster. The upstream server-side refusal (EPINIOROADMAP-56)
 // is the authoritative protection.
 func EnsureNotAdopted(ctx context.Context, namespace, name, operation string) error {
-	k, err := client.GetKubeClient()
+	k, err := GetKubeClient()
 	if err != nil {
 		log.Printf("adopted-mode guard: k8s client unavailable, skipping check: %v", err)
 		return nil
@@ -401,7 +400,7 @@ func buildAdoptedAppCR(namespace, name, image string, routes []string, labels, a
 // selector is a subset of the Deployment's pod selector labels. Returns
 // "" if none or if the discovery is ambiguous. Callers should pass an
 // explicit name when ambiguity matters.
-func discoverServiceForDeployment(ctx context.Context, k *client.KubeClient, namespace string, depSelector map[string]string) string {
+func discoverServiceForDeployment(ctx context.Context, k *KubeClient, namespace string, depSelector map[string]string) string {
 	if len(depSelector) == 0 {
 		return ""
 	}
@@ -428,7 +427,7 @@ func discoverServiceForDeployment(ctx context.Context, k *client.KubeClient, nam
 // deriveRoutes collects Ingress hosts whose backend references the given
 // Service name. Returns "<host><path>" entries, or just "<host>" when the
 // Ingress rule's path is "/" or empty (Epinio's route convention).
-func deriveRoutes(ctx context.Context, k *client.KubeClient, namespace, serviceName string) []string {
+func deriveRoutes(ctx context.Context, k *KubeClient, namespace, serviceName string) []string {
 	if serviceName == "" {
 		return nil
 	}
@@ -510,15 +509,4 @@ func toStringMap(m map[string]string) map[string]interface{} {
 		out[k] = v
 	}
 	return out
-}
-
-// describeAdopted builds a short human-readable hint explaining an adopted
-// app's constraint set. Used by show_app's advisory field.
-func describeAdopted() string {
-	return strings.Join([]string{
-		"adopted: deployed via kubectl (no Helm release owned by Epinio).",
-		"Safe: list, show, logs, exec, port-forward.",
-		"Refused: update_app, restart_app, delete_app, bind_configuration — they would re-render the chart and destroy the install.",
-		"Use `kubectl` for lifecycle, or `release_app` to detach from Epinio.",
-	}, " ")
 }

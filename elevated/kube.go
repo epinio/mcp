@@ -1,4 +1,4 @@
-package client
+package elevated
 
 import (
 	"context"
@@ -113,29 +113,11 @@ var EpinioAppGVR = schema.GroupVersionResource{
 
 // ReadEpinioApp fetches the Epinio Application CRD for the given namespace/name.
 // Returns the raw unstructured object so callers can pull specific spec fields
-// (e.g. blobuid) without binding to an Epinio-typed dependency.
+// spec fields without binding to an Epinio-typed dependency.
 func (k *KubeClient) ReadEpinioApp(ctx context.Context, namespace, name string) (*unstructured.Unstructured, error) {
 	return k.Dynamic.Resource(EpinioAppGVR).
 		Namespace(namespace).
 		Get(ctx, name, metav1.GetOptions{})
-}
-
-// AppBlobUID reads the .spec.blobuid of the Epinio Application CRD. Returns
-// the uid string or an error if missing. This is the key we use to fetch the
-// staged source tarball from S3.
-func (k *KubeClient) AppBlobUID(ctx context.Context, namespace, name string) (string, error) {
-	app, err := k.ReadEpinioApp(ctx, namespace, name)
-	if err != nil {
-		return "", fmt.Errorf("read app %q in %q: %w", name, namespace, err)
-	}
-	uid, found, err := unstructured.NestedString(app.Object, "spec", "blobuid")
-	if err != nil {
-		return "", fmt.Errorf("extract blobuid: %w", err)
-	}
-	if !found || uid == "" {
-		return "", fmt.Errorf("app %q in %q has no blobuid", name, namespace)
-	}
-	return uid, nil
 }
 
 // IsAppAdopted returns true when the App CRD carries the

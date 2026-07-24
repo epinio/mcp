@@ -25,7 +25,7 @@ tolerations: []
 affinity: {}
 userConfig: {}
 
-# Custom: enable RBAC for reading Epinio app CRDs.
-# DEPRECATED: Remove when Epinio exposes blobuid in the REST API.
+# Custom: enable RBAC for reading Epinio app CRDs (adoption tools +
+# self_adoption capability).
 appCrdAccess:
   enabled: true

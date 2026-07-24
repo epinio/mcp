@@ -269,6 +269,38 @@ func (c *Client) CreateApp(namespace string, req AppCreateRequest) error {
 	return c.do("POST", "/namespaces/"+namespace+"/applications", req, nil)
 }
 
+// GetAppSource downloads an application's staging source tarball via the Epinio
+// API (GET .../applications/:app/source, added in Epinio 1.14.1). Credentials
+// stay server-side — this replaces the old direct blobuid+S3 fetch. Returns the
+// raw tar bytes. A 400 means the app exists but has no stored source (never
+// staged); a 404 means the app is unknown.
+func (c *Client) GetAppSource(namespace, name string) ([]byte, error) {
+	req, err := http.NewRequest("GET", c.url("/namespaces/"+namespace+"/applications/"+name+"/source"), nil)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	c.setAuth(req)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("request GET source: %w", err)
+	}
+	defer resp.Body.Close()
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read source response: %w", err)
+	}
+	if resp.StatusCode >= 400 {
+		snippet := string(data)
+		if isHTMLResponse(resp, data) {
+			snippet = fmt.Sprintf("proxy returned an HTML error page (%d bytes)", len(data))
+		}
+		return nil, fmt.Errorf("API error %d: %s", resp.StatusCode, snippet)
+	}
+	return data, nil
+}
+
 // DeleteApp deletes an application.
 func (c *Client) DeleteApp(namespace, name string) error {
 	return c.do("DELETE", "/namespaces/"+namespace+"/applications/"+name, nil, nil)
@@ -573,7 +605,7 @@ func (c *Client) AppLogs(namespace, app string, stageID string, follow bool) ([]
 	if !follow {
 		timeout = 3 * time.Second
 	}
-	conn.SetReadDeadline(time.Now().Add(timeout))
+	_ = conn.SetReadDeadline(time.Now().Add(timeout))
 
 	var lines []string
 	for {

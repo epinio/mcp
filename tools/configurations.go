@@ -158,7 +158,7 @@ func RegisterConfigurationTools(server *mcp.Server, c *client.Client) {
 			req *mcp.CallToolRequest,
 			input BindConfigInput,
 		) (*mcp.CallToolResult, BindConfigOutput, error) {
-			if err := EnsureNotAdopted(ctx, input.Namespace, input.App, "bind_configuration"); err != nil {
+			if err := appMutationGuard.EnsureMutable(ctx, input.Namespace, input.App, "bind_configuration"); err != nil {
 				return nil, BindConfigOutput{}, err
 			}
 			if err := c.BindConfiguration(input.Namespace, input.App, input.Configurations); err != nil {
@@ -188,7 +188,7 @@ func RegisterConfigurationTools(server *mcp.Server, c *client.Client) {
 			req *mcp.CallToolRequest,
 			input UnbindConfigInput,
 		) (*mcp.CallToolResult, UnbindConfigOutput, error) {
-			if err := EnsureNotAdopted(ctx, input.Namespace, input.App, "unbind_configuration"); err != nil {
+			if err := appMutationGuard.EnsureMutable(ctx, input.Namespace, input.App, "unbind_configuration"); err != nil {
 				return nil, UnbindConfigOutput{}, err
 			}
 			if err := c.UnbindConfiguration(input.Namespace, input.App, input.Configuration); err != nil {
