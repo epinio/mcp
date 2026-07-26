@@ -63,7 +63,9 @@ func NewWithToken(baseURL, token string) *Client {
 }
 
 // NewWithOIDC creates a new Epinio API client with OIDC token refresh support.
-func NewWithOIDC(baseURL, tokenEndpoint, clientID, accessToken, refreshToken string) *Client {
+func NewWithOIDC(
+	baseURL, tokenEndpoint, clientID, accessToken, refreshToken string,
+) *Client {
 	baseURL = strings.TrimRight(baseURL, "/")
 
 	config := &oauth2.Config{
@@ -79,9 +81,13 @@ func NewWithOIDC(baseURL, tokenEndpoint, clientID, accessToken, refreshToken str
 		TokenType:    "Bearer",
 	}
 
-	ctx := context.WithValue(context.Background(), oauth2.HTTPClient, &http.Client{
-		Transport: tlsTransport(),
-	})
+	ctx := context.WithValue(
+		context.Background(),
+		oauth2.HTTPClient,
+		&http.Client{
+			Transport: tlsTransport(),
+		},
+	)
 
 	ts := config.TokenSource(ctx, token)
 
@@ -96,6 +102,7 @@ func NewWithOIDC(baseURL, tokenEndpoint, clientID, accessToken, refreshToken str
 func (c *Client) setAuth(req *http.Request) {
 	if c.tokenSource != nil {
 		tok, err := c.tokenSource.Token()
+
 		if err != nil {
 			log.Printf("warning: failed to refresh token: %v", err)
 			req.Header.Set("Authorization", "Bearer "+c.Token)
@@ -121,6 +128,7 @@ func (c *Client) do(method, path string, body any, result any) error {
 	var bodyReader io.Reader
 	if body != nil {
 		data, err := json.Marshal(body)
+
 		if err != nil {
 			return fmt.Errorf("marshal request: %w", err)
 		}
@@ -128,6 +136,7 @@ func (c *Client) do(method, path string, body any, result any) error {
 	}
 
 	req, err := http.NewRequest(method, c.url(path), bodyReader)
+
 	if err != nil {
 		return fmt.Errorf("create request: %w", err)
 	}
@@ -137,12 +146,14 @@ func (c *Client) do(method, path string, body any, result any) error {
 	}
 
 	resp, err := c.httpClient.Do(req)
+
 	if err != nil {
 		return fmt.Errorf("request %s %s: %w", method, path, err)
 	}
 	defer resp.Body.Close()
 
 	respBody, err := io.ReadAll(resp.Body)
+
 	if err != nil {
 		return fmt.Errorf("read response: %w", err)
 	}
@@ -153,7 +164,10 @@ func (c *Client) do(method, path string, body any, result any) error {
 		// a terrible error. Detect it and surface something concise.
 		snippet := string(respBody)
 		if isHTMLResponse(resp, respBody) {
-			snippet = fmt.Sprintf("proxy returned an HTML error page (%d bytes) — likely an ingress timeout or outage", len(respBody))
+			snippet = fmt.Sprintf(
+				"proxy returned an HTML error page (%d bytes)",
+				len(respBody),
+			)
 		}
 		return fmt.Errorf("API error %d: %s", resp.StatusCode, snippet)
 	}
@@ -180,7 +194,10 @@ func isHTMLResponse(resp *http.Response, body []byte) bool {
 		head = head[:256]
 	}
 	lower := strings.ToLower(head)
-	return strings.HasPrefix(lower, "<!doctype html") || strings.HasPrefix(lower, "<html")
+	return strings.HasPrefix(
+		lower,
+		"<!doctype html",
+	) || strings.HasPrefix(lower, "<html")
 }
 
 // isProxyTimeout returns true when an error from c.do looks like an
@@ -240,7 +257,14 @@ func (c *Client) DeleteNamespace(name string) error {
 // ListApps lists applications in a namespace.
 func (c *Client) ListApps(namespace string) ([]App, error) {
 	var resp []App
-	if err := c.do("GET", "/namespaces/"+namespace+"/applications", nil, &resp); err != nil {
+	err := c.do(
+		"GET",
+		"/namespaces/"+namespace+"/applications",
+		nil,
+		&resp,
+	)
+
+	if err != nil {
 		return nil, err
 	}
 	return resp, nil
@@ -258,7 +282,14 @@ func (c *Client) ListAllApps() ([]App, error) {
 // ShowApp returns details of a specific application.
 func (c *Client) ShowApp(namespace, name string) (*App, error) {
 	var resp App
-	if err := c.do("GET", "/namespaces/"+namespace+"/applications/"+name, nil, &resp); err != nil {
+	err := c.do(
+		"GET",
+		"/namespaces/"+namespace+"/applications/"+name,
+		nil,
+		&resp,
+	)
+
+	if err != nil {
 		return nil, err
 	}
 	return &resp, nil
@@ -275,19 +306,26 @@ func (c *Client) CreateApp(namespace string, req AppCreateRequest) error {
 // raw tar bytes. A 400 means the app exists but has no stored source (never
 // staged); a 404 means the app is unknown.
 func (c *Client) GetAppSource(namespace, name string) ([]byte, error) {
-	req, err := http.NewRequest("GET", c.url("/namespaces/"+namespace+"/applications/"+name+"/source"), nil)
+	req, err := http.NewRequest(
+		"GET",
+		c.url("/namespaces/"+url.PathEscape(namespace)+"/applications/"+url.PathEscape(name)+"/source"),
+		nil,
+	)
+
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 	c.setAuth(req)
 
 	resp, err := c.httpClient.Do(req)
+
 	if err != nil {
 		return nil, fmt.Errorf("request GET source: %w", err)
 	}
 	defer resp.Body.Close()
 
 	data, err := io.ReadAll(resp.Body)
+
 	if err != nil {
 		return nil, fmt.Errorf("read source response: %w", err)
 	}
@@ -303,27 +341,46 @@ func (c *Client) GetAppSource(namespace, name string) ([]byte, error) {
 
 // DeleteApp deletes an application.
 func (c *Client) DeleteApp(namespace, name string) error {
-	return c.do("DELETE", "/namespaces/"+namespace+"/applications/"+name, nil, nil)
+	return c.do(
+		"DELETE",
+		"/namespaces/"+namespace+"/applications/"+name,
+		nil,
+		nil,
+	)
 }
 
 // UpdateApp updates an application.
 func (c *Client) UpdateApp(namespace, name string, req AppUpdateRequest) error {
-	return c.do("PATCH", "/namespaces/"+namespace+"/applications/"+name, req, nil)
+	return c.do(
+		"PATCH",
+		"/namespaces/"+namespace+"/applications/"+name,
+		req,
+		nil,
+	)
 }
 
 // RestartApp restarts an application.
 func (c *Client) RestartApp(namespace, name string) error {
-	return c.do("POST", "/namespaces/"+namespace+"/applications/"+name+"/restart", nil, nil)
+	return c.do(
+		"POST",
+		"/namespaces/"+namespace+"/applications/"+name+"/restart",
+		nil,
+		nil,
+	)
 }
 
 // UploadApp uploads application source and returns the blob UID.
-func (c *Client) UploadApp(namespace, name string, source io.Reader) (*UploadResponse, error) {
+func (c *Client) UploadApp(
+	namespace, name string,
+	source io.Reader,
+) (*UploadResponse, error) {
 	endpoint := c.url("/namespaces/" + namespace + "/applications/" + name + "/store")
 
 	// Epinio expects multipart/form-data with a "file" field containing the tar.gz
 	var buf bytes.Buffer
 	writer := multipart.NewWriter(&buf)
 	part, err := writer.CreateFormFile("file", "source.tar.gz")
+
 	if err != nil {
 		return nil, fmt.Errorf("create multipart form: %w", err)
 	}
@@ -335,6 +392,7 @@ func (c *Client) UploadApp(namespace, name string, source io.Reader) (*UploadRes
 	}
 
 	req, err := http.NewRequest("POST", endpoint, &buf)
+
 	if err != nil {
 		return nil, fmt.Errorf("create upload request: %w", err)
 	}
@@ -342,6 +400,7 @@ func (c *Client) UploadApp(namespace, name string, source io.Reader) (*UploadRes
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 
 	resp, err := c.httpClient.Do(req)
+
 	if err != nil {
 		return nil, fmt.Errorf("upload: %w", err)
 	}
@@ -349,7 +408,11 @@ func (c *Client) UploadApp(namespace, name string, source io.Reader) (*UploadRes
 
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("upload error %d: %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf(
+			"upload error %d: %s",
+			resp.StatusCode,
+			string(body),
+		)
 	}
 
 	var result UploadResponse
@@ -360,9 +423,19 @@ func (c *Client) UploadApp(namespace, name string, source io.Reader) (*UploadRes
 }
 
 // StageApp stages an application build.
-func (c *Client) StageApp(namespace, name string, req StageRequest) (*StageResponse, error) {
+func (c *Client) StageApp(
+	namespace, name string,
+	req StageRequest,
+) (*StageResponse, error) {
 	var resp StageResponse
-	if err := c.do("POST", "/namespaces/"+namespace+"/applications/"+name+"/stage", req, &resp); err != nil {
+	err := c.do(
+		"POST",
+		"/namespaces/"+namespace+"/applications/"+name+"/stage",
+		req,
+		&resp,
+	)
+
+	if err != nil {
 		return nil, err
 	}
 	return &resp, nil
@@ -393,7 +466,11 @@ func (c *Client) StagingComplete(namespace, stageID string) error {
 			return err // genuine failure — surface it
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("staging did not complete within %s (last error: %w)", stagingCompleteMaxWait, lastErr)
+			return fmt.Errorf(
+				"staging did not complete within %s (last error: %w)",
+				stagingCompleteMaxWait,
+				lastErr,
+			)
 		}
 		// Brief backoff before retrying — Epinio is still working upstream.
 		time.Sleep(2 * time.Second)
@@ -401,9 +478,19 @@ func (c *Client) StagingComplete(namespace, stageID string) error {
 }
 
 // DeployApp deploys a staged application.
-func (c *Client) DeployApp(namespace, name string, req DeployRequest) (*DeployResponse, error) {
+func (c *Client) DeployApp(
+	namespace, name string,
+	req DeployRequest,
+) (*DeployResponse, error) {
 	var resp DeployResponse
-	if err := c.do("POST", "/namespaces/"+namespace+"/applications/"+name+"/deploy", req, &resp); err != nil {
+	err := c.do(
+		"POST",
+		"/namespaces/"+namespace+"/applications/"+name+"/deploy",
+		req,
+		&resp,
+	)
+
+	if err != nil {
 		return nil, err
 	}
 	return &resp, nil
@@ -430,7 +517,11 @@ func (c *Client) AppRunning(namespace, name string) error {
 			return err
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("app did not reach running state within %s (last error: %w)", appRunningMaxWait, lastErr)
+			return fmt.Errorf(
+				"app did not reach running state within %s (last error: %w)",
+				appRunningMaxWait,
+				lastErr,
+			)
 		}
 		time.Sleep(2 * time.Second)
 	}
@@ -439,7 +530,14 @@ func (c *Client) AppRunning(namespace, name string) error {
 // ListEnv lists environment variables for an app.
 func (c *Client) ListEnv(namespace, app string) ([]EnvVariable, error) {
 	var resp []EnvVariable
-	if err := c.do("GET", "/namespaces/"+namespace+"/applications/"+app+"/environment", nil, &resp); err != nil {
+	err := c.do(
+		"GET",
+		"/namespaces/"+namespace+"/applications/"+app+"/environment",
+		nil,
+		&resp,
+	)
+
+	if err != nil {
 		return nil, err
 	}
 	return resp, nil
@@ -447,48 +545,97 @@ func (c *Client) ListEnv(namespace, app string) ([]EnvVariable, error) {
 
 // SetEnv sets environment variables on an app.
 func (c *Client) SetEnv(namespace, app string, env map[string]string) error {
-	return c.do("POST", "/namespaces/"+namespace+"/applications/"+app+"/environment", env, nil)
+	return c.do(
+		"POST",
+		"/namespaces/"+namespace+"/applications/"+app+"/environment",
+		env,
+		nil,
+	)
 }
 
 // UnsetEnv deletes an environment variable from an app.
 func (c *Client) UnsetEnv(namespace, app, envName string) error {
-	return c.do("DELETE", "/namespaces/"+namespace+"/applications/"+app+"/environment/"+envName, nil, nil)
+	return c.do(
+		"DELETE",
+		"/namespaces/"+namespace+"/applications/"+app+"/environment/"+envName,
+		nil,
+		nil,
+	)
 }
 
 // ListConfigurations lists configurations in a namespace.
-func (c *Client) ListConfigurations(namespace string) ([]ConfigurationResponse, error) {
+func (c *Client) ListConfigurations(
+	namespace string,
+) ([]ConfigurationResponse, error) {
 	var resp []ConfigurationResponse
-	if err := c.do("GET", "/namespaces/"+namespace+"/configurations", nil, &resp); err != nil {
+	err := c.do(
+		"GET",
+		"/namespaces/"+namespace+"/configurations",
+		nil,
+		&resp,
+	)
+
+	if err != nil {
 		return nil, err
 	}
 	return resp, nil
 }
 
 // CreateConfiguration creates a new configuration.
-func (c *Client) CreateConfiguration(namespace string, req ConfigurationCreateRequest) error {
+func (c *Client) CreateConfiguration(
+	namespace string,
+	req ConfigurationCreateRequest,
+) error {
 	return c.do("POST", "/namespaces/"+namespace+"/configurations", req, nil)
 }
 
 // DeleteConfiguration deletes a configuration.
 func (c *Client) DeleteConfiguration(namespace, name string) error {
-	return c.do("DELETE", "/namespaces/"+namespace+"/configurations/"+name, nil, nil)
+	return c.do(
+		"DELETE",
+		"/namespaces/"+namespace+"/configurations/"+name,
+		nil,
+		nil,
+	)
 }
 
 // BindConfiguration binds configurations to an app.
-func (c *Client) BindConfiguration(namespace, app string, configurations []string) error {
+func (c *Client) BindConfiguration(
+	namespace, app string,
+	configurations []string,
+) error {
 	body := map[string][]string{"names": configurations}
-	return c.do("POST", "/namespaces/"+namespace+"/applications/"+app+"/configurationbindings", body, nil)
+	return c.do(
+		"POST",
+		"/namespaces/"+namespace+"/applications/"+app+"/configurationbindings",
+		body,
+		nil,
+	)
 }
 
 // UnbindConfiguration unbinds a configuration from an app.
-func (c *Client) UnbindConfiguration(namespace, app, configuration string) error {
-	return c.do("DELETE", "/namespaces/"+namespace+"/applications/"+app+"/configurationbindings/"+configuration, nil, nil)
+func (c *Client) UnbindConfiguration(
+	namespace, app, configuration string,
+) error {
+	return c.do(
+		"DELETE",
+		"/namespaces/"+namespace+"/applications/"+app+"/configurationbindings/"+configuration,
+		nil,
+		nil,
+	)
 }
 
 // ListServices lists services in a namespace.
 func (c *Client) ListServices(namespace string) ([]Service, error) {
 	var resp []Service
-	if err := c.do("GET", "/namespaces/"+namespace+"/services", nil, &resp); err != nil {
+	err := c.do(
+		"GET",
+		"/namespaces/"+namespace+"/services",
+		nil,
+		&resp,
+	)
+
+	if err != nil {
 		return nil, err
 	}
 	return resp, nil
@@ -518,7 +665,14 @@ func (c *Client) ListAppCharts() ([]AppChart, error) {
 // description and settings schema.
 func (c *Client) ShowAppChart(name string) (*AppChart, error) {
 	var resp AppChart
-	if err := c.do("GET", "/appcharts/"+name, nil, &resp); err != nil {
+	err := c.do(
+		"GET",
+		"/appcharts/"+url.PathEscape(name),
+		nil,
+		&resp,
+	)
+
+	if err != nil {
 		return nil, err
 	}
 	return &resp, nil
@@ -527,14 +681,107 @@ func (c *Client) ShowAppChart(name string) (*AppChart, error) {
 // ShowCatalogService fetches a single catalog service by name.
 func (c *Client) ShowCatalogService(name string) (*CatalogService, error) {
 	var resp CatalogService
-	if err := c.do("GET", "/catalogservices/"+name, nil, &resp); err != nil {
+	err := c.do(
+		"GET",
+		"/catalogservices/"+url.PathEscape(name),
+		nil,
+		&resp,
+	)
+
+	if err != nil {
 		return nil, err
 	}
 	return &resp, nil
 }
 
+// --- AppChart CRUD (Epinio 1.14.1) ---
+
+// CreateAppChart registers a new AppChart on the cluster.
+func (c *Client) CreateAppChart(req AppChartCreateRequest) error {
+	return c.do("POST", "/appcharts", req, nil)
+}
+
+// UpdateAppChart updates an existing AppChart (name from the URL).
+func (c *Client) UpdateAppChart(name string, req AppChartUpdateRequest) error {
+	return c.do("PATCH", "/appcharts/"+url.PathEscape(name), req, nil)
+}
+
+// DeleteAppChart removes an AppChart.
+func (c *Client) DeleteAppChart(name string) error {
+	return c.do("DELETE", "/appcharts/"+url.PathEscape(name), nil, nil)
+}
+
+// --- BuilderImage CRUD (Epinio 1.14.1) ---
+
+// ListBuilderImages lists the BuilderImage entries registered on the cluster —
+// the builder images an app may stage with.
+func (c *Client) ListBuilderImages() ([]BuilderImage, error) {
+	var resp []BuilderImage
+	if err := c.do("GET", "/builderimages", nil, &resp); err != nil {
+		return nil, err
+	}
+	return resp, nil
+}
+
+// ShowBuilderImage fetches a single BuilderImage by name.
+func (c *Client) ShowBuilderImage(name string) (*BuilderImage, error) {
+	var resp BuilderImage
+	err := c.do(
+		"GET",
+		"/builderimages/"+url.PathEscape(name),
+		nil,
+		&resp,
+	)
+
+	if err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// CreateBuilderImage registers a new BuilderImage.
+func (c *Client) CreateBuilderImage(req BuilderImageCreateRequest) error {
+	return c.do("POST", "/builderimages", req, nil)
+}
+
+// UpdateBuilderImage updates an existing BuilderImage (name from the URL).
+func (c *Client) UpdateBuilderImage(
+	name string,
+	req BuilderImageUpdateRequest,
+) error {
+	return c.do("PATCH", "/builderimages/"+url.PathEscape(name), req, nil)
+}
+
+// DeleteBuilderImage removes a BuilderImage.
+func (c *Client) DeleteBuilderImage(name string) error {
+	return c.do("DELETE", "/builderimages/"+url.PathEscape(name), nil, nil)
+}
+
+// --- CatalogService CRUD (Epinio 1.14.1) ---
+
+// CreateCatalogService registers a new catalog service entry.
+func (c *Client) CreateCatalogService(req CatalogServiceCreateRequest) error {
+	return c.do("POST", "/catalogservices", req, nil)
+}
+
+// UpdateCatalogService updates an existing catalog service entry (name from the URL).
+func (c *Client) UpdateCatalogService(
+	name string,
+	req CatalogServiceUpdateRequest,
+) error {
+	return c.do("PATCH", "/catalogservices/"+url.PathEscape(name), req, nil)
+}
+
+// DeleteCatalogService removes a catalog service entry.
+func (c *Client) DeleteCatalogService(name string) error {
+	return c.do("DELETE", "/catalogservices/"+url.PathEscape(name), nil, nil)
+}
+
 // CreateService creates a new service instance.
-func (c *Client) CreateService(namespace string, req ServiceCreateRequest) error {
+func (c *Client) CreateService(
+	namespace string,
+	req ServiceCreateRequest,
+) error {
 	return c.do("POST", "/namespaces/"+namespace+"/services", req, nil)
 }
 
@@ -544,13 +791,29 @@ func (c *Client) DeleteService(namespace, name string) error {
 }
 
 // BindService binds a service to an app.
-func (c *Client) BindService(namespace, service string, req ServiceBindRequest) error {
-	return c.do("POST", "/namespaces/"+namespace+"/services/"+service+"/bind", req, nil)
+func (c *Client) BindService(
+	namespace, service string,
+	req ServiceBindRequest,
+) error {
+	return c.do(
+		"POST",
+		"/namespaces/"+namespace+"/services/"+service+"/bind",
+		req,
+		nil,
+	)
 }
 
 // UnbindService unbinds a service from an app.
-func (c *Client) UnbindService(namespace, service string, req ServiceUnbindRequest) error {
-	return c.do("POST", "/namespaces/"+namespace+"/services/"+service+"/unbind", req, nil)
+func (c *Client) UnbindService(
+	namespace, service string,
+	req ServiceUnbindRequest,
+) error {
+	return c.do(
+		"POST",
+		"/namespaces/"+namespace+"/services/"+service+"/unbind",
+		req,
+		nil,
+	)
 }
 
 // wsURL converts the base HTTP URL to a WebSocket URL.
@@ -579,8 +842,13 @@ type containerLogLine struct {
 // keyed by (namespace, stage_id) with no app name; BuildLogStreamURL handles
 // the path switch. Auth is via Epinio's short-lived ?authtoken= query
 // parameter — the OIDC bearer header is not accepted on the WS upgrade.
-func (c *Client) AppLogs(namespace, app string, stageID string, follow bool) ([]string, error) {
+func (c *Client) AppLogs(
+	namespace, app string,
+	stageID string,
+	follow bool,
+) ([]string, error) {
 	wsEndpoint, err := c.BuildLogStreamURL(namespace, app, stageID, follow)
+
 	if err != nil {
 		return nil, err
 	}
@@ -595,7 +863,11 @@ func (c *Client) AppLogs(namespace, app string, stageID string, follow bool) ([]
 		if wsResp != nil {
 			body, _ := io.ReadAll(wsResp.Body)
 			wsResp.Body.Close()
-			statusInfo = fmt.Sprintf(" (HTTP %d: %s)", wsResp.StatusCode, string(body))
+			statusInfo = fmt.Sprintf(
+				" (HTTP %d: %s)",
+				wsResp.StatusCode,
+				string(body),
+			)
 		}
 		return nil, fmt.Errorf("websocket connect: %w%s", dialErr, statusInfo)
 	}
@@ -610,6 +882,7 @@ func (c *Client) AppLogs(namespace, app string, stageID string, follow bool) ([]
 	var lines []string
 	for {
 		_, message, err := conn.ReadMessage()
+
 		if err != nil {
 			// Normal close or deadline exceeded — we're done for this call.
 			break
@@ -659,8 +932,12 @@ func (c *Client) AuthToken() (string, error) {
 // logs (when stageID == "") or a staging build (when stageID != ""). The URL
 // carries the short-lived authtoken in the query string; the caller should
 // dial it within ~30 seconds. See AuthToken for the TTL note.
-func (c *Client) BuildLogStreamURL(namespace, app, stageID string, follow bool) (string, error) {
+func (c *Client) BuildLogStreamURL(
+	namespace, app, stageID string,
+	follow bool,
+) (string, error) {
 	token, err := c.AuthToken()
+
 	if err != nil {
 		return "", fmt.Errorf("fetch ws authtoken: %w", err)
 	}
@@ -685,6 +962,7 @@ func (c *Client) BuildLogStreamURL(namespace, app, stageID string, follow bool) 
 // "malformed token format").
 func (c *Client) ProbeLogStream(namespace, app string) (mode, message string) {
 	wsEndpoint, err := c.BuildLogStreamURL(namespace, app, "", false)
+
 	if err != nil {
 		return "unavailable", fmt.Sprintf("authtoken fetch failed: %v", err)
 	}
@@ -707,18 +985,28 @@ func (c *Client) ProbeLogStream(namespace, app string) (mode, message string) {
 }
 
 // PushApp orchestrates the full push workflow: create (if needed) → upload → stage → wait → deploy → wait.
-func (c *Client) PushApp(namespace, name string, source io.Reader, builderImage string) (*PushResult, error) {
+func (c *Client) PushApp(
+	namespace, name string,
+	source io.Reader,
+	builderImage string,
+) (*PushResult, error) {
 	// Step 1: Ensure the app exists
 	_, err := c.ShowApp(namespace, name)
+
 	if err != nil {
 		// App doesn't exist, create it
-		if createErr := c.CreateApp(namespace, AppCreateRequest{Name: name}); createErr != nil {
+		createErr := c.CreateApp(
+			namespace,
+			AppCreateRequest{Name: name},
+		)
+		if createErr != nil {
 			return nil, fmt.Errorf("create app: %w", createErr)
 		}
 	}
 
 	// Step 2: Upload source
 	upload, err := c.UploadApp(namespace, name, source)
+
 	if err != nil {
 		return nil, fmt.Errorf("upload: %w", err)
 	}

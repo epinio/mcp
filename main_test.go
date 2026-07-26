@@ -18,6 +18,7 @@ func makeJWT(t *testing.T, claims map[string]any) string {
 	t.Helper()
 	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"none","typ":"JWT"}`))
 	payloadJSON, err := json.Marshal(claims)
+
 	if err != nil {
 		t.Fatalf("marshal claims: %v", err)
 	}

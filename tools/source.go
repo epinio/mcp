@@ -72,6 +72,7 @@ func RegisterAppSourceTools(server *mcp.Server, c *client.Client) {
 			input GetAppSourceInput,
 		) (*mcp.CallToolResult, GetAppSourceOutput, error) {
 			body, err := c.GetAppSource(input.Namespace, input.Name)
+
 			if err != nil {
 				return nil, GetAppSourceOutput{}, err
 			}
@@ -81,6 +82,7 @@ func RegisterAppSourceTools(server *mcp.Server, c *client.Client) {
 			}
 			if input.Extract {
 				files, err := extractTar(body)
+
 				if err != nil {
 					return nil, GetAppSourceOutput{}, fmt.Errorf("extract tar: %w", err)
 				}
@@ -108,10 +110,12 @@ func RegisterAppSourceTools(server *mcp.Server, c *client.Client) {
 			input ListAppFilesInput,
 		) (*mcp.CallToolResult, ListAppFilesOutput, error) {
 			body, err := c.GetAppSource(input.Namespace, input.Name)
+
 			if err != nil {
 				return nil, ListAppFilesOutput{}, err
 			}
 			entries, total, err := listTarEntries(body)
+
 			if err != nil {
 				return nil, ListAppFilesOutput{}, fmt.Errorf("list tar: %w", err)
 			}
@@ -132,6 +136,7 @@ func RegisterAppSourceTools(server *mcp.Server, c *client.Client) {
 // stays tiny regardless of tarball size.
 func listTarEntries(raw []byte) ([]AppFileEntry, int64, error) {
 	tr, err := tarReader(raw)
+
 	if err != nil {
 		return nil, 0, err
 	}
@@ -159,6 +164,7 @@ func listTarEntries(raw []byte) ([]AppFileEntry, int64, error) {
 // other non-regular entries.
 func extractTar(raw []byte) (map[string]string, error) {
 	tr, err := tarReader(raw)
+
 	if err != nil {
 		return nil, err
 	}
@@ -175,6 +181,7 @@ func extractTar(raw []byte) (map[string]string, error) {
 			continue
 		}
 		buf, err := io.ReadAll(tr)
+
 		if err != nil {
 			return nil, fmt.Errorf("read %q: %w", hdr.Name, err)
 		}
@@ -189,6 +196,7 @@ func tarReader(raw []byte) (*tar.Reader, error) {
 	var r io.Reader = bytes.NewReader(raw)
 	if len(raw) >= 2 && raw[0] == 0x1f && raw[1] == 0x8b {
 		gz, err := gzip.NewReader(bytes.NewReader(raw))
+
 		if err != nil {
 			return nil, fmt.Errorf("gzip header: %w", err)
 		}

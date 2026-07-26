@@ -192,22 +192,38 @@ type Service struct {
 	Settings              map[string]string `json:"settings,omitempty"`
 }
 
-// CatalogService describes an available service from the catalog.
+// CatalogService describes an available service from the catalog. Mirrors
+// upstream models.CatalogService — note the chart field is `chart`, not
+// `helm_chart`. BoundServices is read-only, populated on GET.
 type CatalogService struct {
-	Meta             MetaLite       `json:"meta"`
-	Description      string         `json:"description"`
-	ShortDescription string         `json:"short_description"`
-	HelmChart        string         `json:"helm_chart"`
-	ChartVersion     string         `json:"chart_version"`
-	AppVersion       string         `json:"app_version"`
-	HelmRepo         HelmRepo       `json:"helm_repo"`
-	Settings         map[string]any `json:"settings,omitempty"`
+	Meta             MetaLite                `json:"meta"`
+	SecretTypes      []string                `json:"secret_types,omitempty"`
+	Description      string                  `json:"description"`
+	ShortDescription string                  `json:"short_description"`
+	HelmChart        string                  `json:"chart,omitempty"`
+	ChartVersion     string                  `json:"chart_version,omitempty"`
+	ServiceIcon      string                  `json:"service_icon,omitempty"`
+	AppVersion       string                  `json:"app_version,omitempty"`
+	HelmRepo         HelmRepo                `json:"helm_repo,omitempty"`
+	Values           string                  `json:"values,omitempty"`
+	Settings         map[string]ChartSetting `json:"settings,omitempty"`
+	// BoundServices is read-only: true when at least one instance derives from
+	// this catalog entry.
+	BoundServices bool `json:"bound_services,omitempty"`
 }
 
 // HelmRepo is a Helm repository reference.
 type HelmRepo struct {
 	Name string `json:"name"`
 	URL  string `json:"url"`
+}
+
+// HelmRepoRequest is the Helm repo reference accepted on catalog-service write
+// requests. Credentials are never sent in the body — only a Secret name.
+type HelmRepoRequest struct {
+	Name   string `json:"name,omitempty"`
+	URL    string `json:"url,omitempty"`
+	Secret string `json:"secret,omitempty"`
 }
 
 // AppChart describes an available Epinio application chart — the thing
@@ -221,6 +237,8 @@ type AppChart struct {
 	HelmChart        string                  `json:"helm_chart,omitempty"`
 	HelmRepo         string                  `json:"helm_repo,omitempty"`
 	Settings         map[string]ChartSetting `json:"settings,omitempty"`
+	// BoundApps is read-only: true when at least one app uses this chart.
+	BoundApps bool `json:"bound_apps,omitempty"`
 }
 
 // ChartSetting describes a single configurable setting on an AppChart,
@@ -256,4 +274,87 @@ type PushResult struct {
 	Routes  []string `json:"routes"`
 	StageID string   `json:"stage_id"`
 	Image   string   `json:"image"`
+}
+
+// --- CRD-resource write requests (Epinio 1.14.1 CRUD) ---
+// These go through the Epinio REST API as the calling user; Epinio enforces
+// RBAC. They are core tools, not the elevated (direct-Kubernetes) tier.
+
+// AppChartCreateRequest is the body for POST /appcharts.
+type AppChartCreateRequest struct {
+	Name             string                  `json:"name"`
+	Description      string                  `json:"description,omitempty"`
+	ShortDescription string                  `json:"short_description,omitempty"`
+	HelmChart        string                  `json:"helm_chart,omitempty"`
+	HelmRepo         string                  `json:"helm_repo,omitempty"`
+	Settings         map[string]ChartSetting `json:"settings,omitempty"`
+	Values           map[string]string       `json:"values,omitempty"`
+}
+
+// AppChartUpdateRequest is the body for PATCH /appcharts/:name (name is taken
+// from the URL). Empty fields are ignored server-side.
+type AppChartUpdateRequest struct {
+	Description      string                  `json:"description,omitempty"`
+	ShortDescription string                  `json:"short_description,omitempty"`
+	HelmChart        string                  `json:"helm_chart,omitempty"`
+	HelmRepo         string                  `json:"helm_repo,omitempty"`
+	Settings         map[string]ChartSetting `json:"settings,omitempty"`
+	Values           map[string]string       `json:"values,omitempty"`
+}
+
+// BuilderImage is the REST DTO for the BuilderImage CRD — the cluster's
+// registry of builder images an app may stage with. Default and BoundApps are
+// read-only (operator policy / computed).
+type BuilderImage struct {
+	Meta             MetaLite `json:"meta,omitempty"`
+	Image            string   `json:"image,omitempty"`
+	Description      string   `json:"description,omitempty"`
+	ShortDescription string   `json:"short_description,omitempty"`
+	Default          bool     `json:"default"`
+	BoundApps        bool     `json:"bound_apps,omitempty"`
+}
+
+// BuilderImageCreateRequest is the body for POST /builderimages.
+type BuilderImageCreateRequest struct {
+	Name             string `json:"name"`
+	Image            string `json:"image,omitempty"`
+	Description      string `json:"description,omitempty"`
+	ShortDescription string `json:"short_description,omitempty"`
+}
+
+// BuilderImageUpdateRequest is the body for PATCH /builderimages/:name.
+type BuilderImageUpdateRequest struct {
+	Image            string `json:"image,omitempty"`
+	Description      string `json:"description,omitempty"`
+	ShortDescription string `json:"short_description,omitempty"`
+}
+
+// CatalogServiceCreateRequest is the body for POST /catalogservices.
+type CatalogServiceCreateRequest struct {
+	Name             string                  `json:"name"`
+	ShortDescription string                  `json:"short_description,omitempty"`
+	Description      string                  `json:"description,omitempty"`
+	HelmChart        string                  `json:"chart,omitempty"`
+	ChartVersion     string                  `json:"chart_version,omitempty"`
+	AppVersion       string                  `json:"app_version,omitempty"`
+	ServiceIcon      string                  `json:"service_icon,omitempty"`
+	Values           string                  `json:"values,omitempty"`
+	HelmRepo         HelmRepoRequest         `json:"helm_repo,omitempty"`
+	Settings         map[string]ChartSetting `json:"settings,omitempty"`
+	SecretTypes      []string                `json:"secret_types,omitempty"`
+}
+
+// CatalogServiceUpdateRequest is the body for PATCH /catalogservices/:name.
+// Empty string fields are ignored; Settings/SecretTypes replace when non-nil.
+type CatalogServiceUpdateRequest struct {
+	ShortDescription string                  `json:"short_description,omitempty"`
+	Description      string                  `json:"description,omitempty"`
+	HelmChart        string                  `json:"chart,omitempty"`
+	ChartVersion     string                  `json:"chart_version,omitempty"`
+	AppVersion       string                  `json:"app_version,omitempty"`
+	ServiceIcon      string                  `json:"service_icon,omitempty"`
+	Values           string                  `json:"values,omitempty"`
+	HelmRepo         *HelmRepoRequest        `json:"helm_repo,omitempty"`
+	Settings         map[string]ChartSetting `json:"settings,omitempty"`
+	SecretTypes      []string                `json:"secret_types,omitempty"`
 }

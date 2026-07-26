@@ -52,6 +52,7 @@ func RegisterEnvTools(server *mcp.Server, c *client.Client) {
 			input ListEnvInput,
 		) (*mcp.CallToolResult, ListEnvOutput, error) {
 			vars, err := c.ListEnv(input.Namespace, input.App)
+
 			if err != nil {
 				return nil, ListEnvOutput{}, fmt.Errorf("list env: %w", err)
 			}
@@ -75,7 +76,11 @@ func RegisterEnvTools(server *mcp.Server, c *client.Client) {
 			req *mcp.CallToolRequest,
 			input SetEnvInput,
 		) (*mcp.CallToolResult, SetEnvOutput, error) {
-			if err := c.SetEnv(input.Namespace, input.App, input.Env); err != nil {
+			if err := c.SetEnv(
+				input.Namespace,
+				input.App,
+				input.Env,
+			); err != nil {
 				return nil, SetEnvOutput{}, fmt.Errorf("set env: %w", err)
 			}
 			return nil, SetEnvOutput{
@@ -101,7 +106,11 @@ func RegisterEnvTools(server *mcp.Server, c *client.Client) {
 			req *mcp.CallToolRequest,
 			input UnsetEnvInput,
 		) (*mcp.CallToolResult, UnsetEnvOutput, error) {
-			if err := c.UnsetEnv(input.Namespace, input.App, input.Name); err != nil {
+			if err := c.UnsetEnv(
+				input.Namespace,
+				input.App,
+				input.Name,
+			); err != nil {
 				return nil, UnsetEnvOutput{}, fmt.Errorf("unset env: %w", err)
 			}
 			return nil, UnsetEnvOutput{

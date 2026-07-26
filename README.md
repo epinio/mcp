@@ -8,10 +8,11 @@ the [Epinio](https://epinio.io) API as tools for AI agents such as Claude. It
 runs on your cluster and translates MCP tool calls into Epinio REST API requests,
 so an agent can deploy and manage applications through conversation.
 
-By default the server wires **only** to the Epinio API, as the calling user. A
-set of elevated capabilities that reach directly into Kubernetes (workload
-adoption) are **off by default** and opt-in via the `EPINIO_MCP_ELEVATED*`
-flags — see the reference docs.
+By default the server wires **only** to the Epinio API, running as the calling
+user — app lifecycle, logs, source retrieval, and CRUD for app charts, builder
+images, and catalog services. A single elevated capability set that reaches
+directly into Kubernetes — workload **adoption** — is **off by default** and
+opt-in via the `EPINIO_MCP_ELEVATED` flag. See the reference docs.
 
 ## Documentation
 
@@ -29,8 +30,8 @@ make setup     # push the MCP to Epinio and smoke-test it
 ```
 
 That is the core install — a pure Epinio-API server. To turn on the opt-in
-elevated capabilities (source retrieval, workload adoption), edit
-`epinio-elevated.yml` and run `make elevated-setup` instead.
+elevated tier (workload **adoption**, which reaches directly into Kubernetes),
+edit `epinio-elevated.yml` and run `make elevated-setup` instead.
 
 See the [install guide](https://docs.epinio.io/getting-started/install-mcp) for
 prerequisites and configuration, and `make help` for all targets.

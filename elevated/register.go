@@ -8,34 +8,36 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// RegisterReadOnly registers the elevated read-only tier: capability reporting
-// (check_capabilities / enable_capability) and connection info for log
-// streaming. Opt-in via EPINIO_MCP_ELEVATED.
+// Register wires the elevated tier — the single opt-in set of capabilities that
+// reach directly into Kubernetes: workload adoption (adopt_app / reconcile_app
+// / release_app) and the capability framework (check_capabilities /
+// enable_capability, including the MCP's own self-adoption). Enabled via the
+// EPINIO_MCP_ELEVATED flag, and requires the standard-elevated appchart's RBAC.
 //
-// Source retrieval used to live here (blobuid lookup + direct S3 fetch), but as
-// of Epinio 1.14.1 it wires to the GET .../applications/:app/source endpoint and
-// is a plain core tool — no Kubernetes, no S3, no elevated RBAC.
-func RegisterReadOnly(server *mcp.Server, c *client.Client) {
+// The adopted-app mutation guard is installed separately and once, at startup,
+// via AdoptionGuard (see main) — never here, because Register runs per request
+// and the guard is a process-global.
+//
+// NOTE: source retrieval and log-stream connection info are NOT elevated — they
+// wire to the Epinio API and live in the core tools package.
+func Register(server *mcp.Server, c *client.Client) {
 	RegisterCapabilityTools(server, c)
-	RegisterConnectionInfoTools(server, c)
+	RegisterAdoptionTools(server, c)
 }
 
-// RegisterAdoption registers the elevated read-write adoption tier
-// (adopt_app / reconcile_app / release_app). These patch arbitrary
-// Deployments/Services and write Secrets directly — the broad-RBAC profile,
-// opt-in via EPINIO_MCP_ELEVATED_ADOPTION. It also installs the adopted-app
-// mutation guard into the core tools so destructive Epinio operations are
-// refused on adopted (kubectl-managed) apps.
-func RegisterAdoption(server *mcp.Server, c *client.Client) {
-	RegisterAdoptionTools(server, c)
-	tools.SetAppMutationGuard(adoptionGuard{})
-}
+// AdoptionGuard returns the guard that refuses destructive Epinio operations on
+// adopted (kubectl-managed) apps. main installs it once at startup when the
+// elevated tier is enabled, so a pure-core deployment keeps the default
+// permissive guard.
+func AdoptionGuard() tools.AppMutationGuard { return adoptionGuard{} }
 
 // adoptionGuard implements tools.AppMutationGuard by deferring to
-// EnsureNotAdopted. Installed only when the adoption tier is active, so a
-// pure-core or read-only deployment keeps the default permissive guard.
+// EnsureNotAdopted.
 type adoptionGuard struct{}
 
-func (adoptionGuard) EnsureMutable(ctx context.Context, namespace, name, operation string) error {
+func (adoptionGuard) EnsureMutable(
+	ctx context.Context,
+	namespace, name, operation string,
+) error {
 	return EnsureNotAdopted(ctx, namespace, name, operation)
 }

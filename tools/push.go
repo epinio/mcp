@@ -81,7 +81,11 @@ func buildTarGz(files map[string]string) (io.Reader, error) {
 					Typeflag: tar.TypeDir,
 					Mode:     0755,
 				}); err != nil {
-					return nil, fmt.Errorf("write tar dir header for %s: %w", dirPath, err)
+					return nil, fmt.Errorf(
+						"write tar dir header for %s: %w",
+						dirPath,
+						err,
+					)
 				}
 			}
 		}
@@ -95,7 +99,11 @@ func buildTarGz(files map[string]string) (io.Reader, error) {
 			return nil, fmt.Errorf("write tar header for %s: %w", filePath, err)
 		}
 		if _, err := tw.Write(data); err != nil {
-			return nil, fmt.Errorf("write tar content for %s: %w", filePath, err)
+			return nil, fmt.Errorf(
+				"write tar content for %s: %w",
+				filePath,
+				err,
+			)
 		}
 	}
 
@@ -114,7 +122,9 @@ func processFiles(files map[string]string) map[string]string {
 	result := make(map[string]string, len(files))
 	for k, v := range files {
 		if strings.HasPrefix(v, "base64:") {
-			decoded, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(v, "base64:"))
+			decoded, err := base64.StdEncoding.DecodeString(
+				strings.TrimPrefix(v, "base64:"),
+			)
 			if err == nil {
 				result[k] = string(decoded)
 				continue
@@ -147,10 +157,17 @@ func RegisterPushTools(server *mcp.Server, c *client.Client) {
 			}
 			processed := processFiles(input.Files)
 			archive, err := buildTarGz(processed)
+
 			if err != nil {
 				return nil, PushAppOutput{}, fmt.Errorf("build archive: %w", err)
 			}
-			result, err := c.PushApp(input.Namespace, input.Name, archive, input.BuilderImage)
+			result, err := c.PushApp(
+				input.Namespace,
+				input.Name,
+				archive,
+				input.BuilderImage,
+			)
+
 			if err != nil {
 				return nil, PushAppOutput{}, fmt.Errorf("push: %w", err)
 			}
@@ -186,10 +203,12 @@ func RegisterPushTools(server *mcp.Server, c *client.Client) {
 			}
 			processed := processFiles(input.Files)
 			archive, err := buildTarGz(processed)
+
 			if err != nil {
 				return nil, UploadAndStageOutput{}, fmt.Errorf("build archive: %w", err)
 			}
 			upload, err := c.UploadApp(input.Namespace, input.Name, archive)
+
 			if err != nil {
 				return nil, UploadAndStageOutput{}, fmt.Errorf("upload: %w", err)
 			}
@@ -202,15 +221,25 @@ func RegisterPushTools(server *mcp.Server, c *client.Client) {
 					builderImage = "paketobuildpacks/builder-jammy-full:0.3.606"
 				}
 			}
-			stageResp, err := c.StageApp(input.Namespace, input.Name, client.StageRequest{
-				App:          client.AppRef{Name: input.Name, Namespace: input.Namespace},
-				BlobUID:      upload.BlobUID,
-				BuilderImage: builderImage,
-			})
+			stageResp, err := c.StageApp(
+				input.Namespace,
+				input.Name,
+				client.StageRequest{
+					App: client.AppRef{
+						Name:      input.Name,
+						Namespace: input.Namespace,
+					},
+					BlobUID:      upload.BlobUID,
+					BuilderImage: builderImage,
+				},
+			)
 			if err != nil {
 				return nil, UploadAndStageOutput{}, fmt.Errorf("stage: %w", err)
 			}
-			if err := c.StagingComplete(input.Namespace, stageResp.Stage.ID); err != nil {
+			if err := c.StagingComplete(
+				input.Namespace,
+				stageResp.Stage.ID,
+			); err != nil {
 				return nil, UploadAndStageOutput{}, fmt.Errorf("staging wait: %w", err)
 			}
 			return nil, UploadAndStageOutput{
@@ -235,12 +264,22 @@ func RegisterPushTools(server *mcp.Server, c *client.Client) {
 			req *mcp.CallToolRequest,
 			input DeployStagedInput,
 		) (*mcp.CallToolResult, DeployStagedOutput, error) {
-			deployResp, err := c.DeployApp(input.Namespace, input.Name, client.DeployRequest{
-				App:      client.AppRef{Name: input.Name, Namespace: input.Namespace},
-				Stage:    client.StageRef{ID: input.StageID},
-				ImageURL: input.Image,
-				Origin:   client.ApplicationOrigin{Kind: 0, Path: "mcp-push"},
-			})
+			deployResp, err := c.DeployApp(
+				input.Namespace,
+				input.Name,
+				client.DeployRequest{
+					App: client.AppRef{
+						Name:      input.Name,
+						Namespace: input.Namespace,
+					},
+					Stage:    client.StageRef{ID: input.StageID},
+					ImageURL: input.Image,
+					Origin: client.ApplicationOrigin{
+						Kind: 0,
+						Path: "mcp-push",
+					},
+				},
+			)
 			if err != nil {
 				return nil, DeployStagedOutput{}, fmt.Errorf("deploy: %w", err)
 			}

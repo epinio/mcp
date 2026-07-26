@@ -123,7 +123,17 @@ namespace: ## Ensure the target Epinio namespace exists (idempotent)
 .PHONY: push
 push: namespace ## Push the MCP. MANIFEST overrides the manifest file (default epinio.yml)
 	$(EPINIO) target $(NAMESPACE)
-	$(EPINIO) push $(or $(MANIFEST),epinio.yml)
+	manifest="$(or $(MANIFEST),epinio.yml)"
+	# Epinio refuses to change an active app's appchart in place. When switching
+	# between the core (standard) and elevated (standard-elevated) installs the
+	# app already exists on the other chart, so recreate it in that case only.
+	want=$$(awk -F':[[:space:]]*' '/^[[:space:]]*appchart:/{print $$2; exit}' "$$manifest")
+	have=$$($(EPINIO) app show epinio-mcp -o json 2>/dev/null | grep -oE '"appchart":"[^"]*"' | head -1 | sed -E 's/.*:"([^"]*)"/\1/')
+	if [ -n "$$have" ] && [ -n "$$want" ] && [ "$$have" != "$$want" ]; then
+		echo "appchart change ($$have -> $$want): recreating epinio-mcp (Epinio can't switch it in place)"
+		$(EPINIO) app delete epinio-mcp
+	fi
+	$(EPINIO) push "$$manifest"
 	echo "✓ push complete"
 
 .PHONY: verify

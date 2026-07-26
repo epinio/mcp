@@ -58,6 +58,7 @@ func TestDoSuccess(t *testing.T) {
 
 	c := New(srv.URL, "admin", "pw")
 	info, err := c.Info()
+
 	if err != nil {
 		t.Fatalf("Info() error = %v", err)
 	}

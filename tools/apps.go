@@ -180,6 +180,7 @@ func RegisterAppTools(server *mcp.Server, c *client.Client) {
 			input ShowAppInput,
 		) (*mcp.CallToolResult, ShowAppOutput, error) {
 			app, err := c.ShowApp(input.Namespace, input.Name)
+
 			if err != nil {
 				return nil, ShowAppOutput{}, fmt.Errorf("show app: %w", err)
 			}
@@ -213,7 +214,7 @@ func RegisterAppTools(server *mcp.Server, c *client.Client) {
 		&mcp.Tool{
 			Name:        "create_app",
 			Annotations: &mcp.ToolAnnotations{Title: "Create App"},
-			Description: "Create a new Epinio application (does not deploy it — use push_app for that)",
+			Description: "Create a new Epinio application",
 		},
 		func(
 			ctx context.Context,
@@ -251,12 +252,19 @@ func RegisterAppTools(server *mcp.Server, c *client.Client) {
 			req *mcp.CallToolRequest,
 			input DeleteAppInput,
 		) (*mcp.CallToolResult, DeleteAppOutput, error) {
-			if err := appMutationGuard.EnsureMutable(ctx, input.Namespace, input.Name, "delete_app"); err != nil {
+			if err := appMutationGuard.EnsureMutable(
+				ctx,
+				input.Namespace,
+				input.Name,
+				"delete_app",
+			); err != nil {
 				return nil, DeleteAppOutput{}, err
 			}
+
 			if err := c.DeleteApp(input.Namespace, input.Name); err != nil {
 				return nil, DeleteAppOutput{}, fmt.Errorf("delete app: %w", err)
 			}
+
 			return nil, DeleteAppOutput{
 				Status: fmt.Sprintf(
 					"app %q deleted from namespace %q",
@@ -279,7 +287,12 @@ func RegisterAppTools(server *mcp.Server, c *client.Client) {
 			req *mcp.CallToolRequest,
 			input RestartAppInput,
 		) (*mcp.CallToolResult, RestartAppOutput, error) {
-			if err := appMutationGuard.EnsureMutable(ctx, input.Namespace, input.Name, "restart_app"); err != nil {
+			if err := appMutationGuard.EnsureMutable(
+				ctx,
+				input.Namespace,
+				input.Name,
+				"restart_app",
+			); err != nil {
 				return nil, RestartAppOutput{}, err
 			}
 			if err := c.RestartApp(input.Namespace, input.Name); err != nil {

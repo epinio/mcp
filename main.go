@@ -34,7 +34,13 @@ func main() {
 
 	var c *client.Client
 	if token != "" && refreshToken != "" && tokenEndpoint != "" {
-		c = client.NewWithOIDC(apiURL, tokenEndpoint, clientID, token, refreshToken)
+		c = client.NewWithOIDC(
+			apiURL,
+			tokenEndpoint,
+			clientID,
+			token,
+			refreshToken,
+		)
 		log.Printf("Using OIDC auth with token refresh")
 	} else if token != "" {
 		c = client.NewWithToken(apiURL, token)
@@ -45,35 +51,42 @@ func main() {
 	}
 
 	info, err := c.Info()
+
 	if err != nil {
 		log.Fatalf("failed to connect to Epinio API at %s: %v", apiURL, err)
 	}
-	log.Printf("Connected to Epinio %s (k8s %s, platform %s)", info.Version, info.KubeVersion, info.Platform)
+	log.Printf(
+		"Connected to Epinio %s (k8s %s, platform %s)",
+		info.Version,
+		info.KubeVersion,
+		info.Platform,
+	)
 
 	impl := &mcp.Implementation{
 		Name:    "epinio-mcp",
 		Version: version,
 	}
 
-	// Opt-in elevated tiers. Default off — the beta is a pure Epinio-API MCP.
-	// EPINIO_MCP_ELEVATED enables the read-only tier (capability reporting +
-	// log-stream connection info), EPINIO_MCP_ELEVATED_ADOPTION the read-write
-	// adoption tier. Both reach past the Epinio API into Kubernetes and require
-	// the standard-elevated appchart's RBAC — see the install manifests.
+	// Opt-in elevated tier.
+	// EPINIO_MCP_ELEVATED enables the direct-Kubernetes tier: workload adoption
+	// plus the capability framework (check/enable, self-adoption). It requires
+	// the standard-elevated appchart's RBAC, see the install manifests.
 	enableElevated := envBool("EPINIO_MCP_ELEVATED", false)
-	enableAdoption := envBool("EPINIO_MCP_ELEVATED_ADOPTION", false)
-	log.Printf("tool tiers: core=on elevated=%t adoption=%t", enableElevated, enableAdoption)
+	log.Printf("tool tiers: core=on elevated=%t", enableElevated)
 
-	// registerTools wires the core Epinio-API tools plus whichever elevated
-	// tiers are enabled. Used for both the server-level client and each
-	// per-request client so the exposed surface is identical either way.
+	// Install the adopted-app mutation guard once, here at startup, before any
+	// request handler runs.
+	if enableElevated {
+		tools.SetAppMutationGuard(elevated.AdoptionGuard())
+	}
+
+	// registerTools wires the core Epinio-API tools plus the elevated tier when
+	// enabled. Used for both the server-level client and each per-request client
+	// so the exposed surface is identical either way.
 	registerTools := func(s *mcp.Server, cl *client.Client) {
 		tools.RegisterCore(s, cl)
 		if enableElevated {
-			elevated.RegisterReadOnly(s, cl)
-		}
-		if enableAdoption {
-			elevated.RegisterAdoption(s, cl)
+			elevated.Register(s, cl)
 		}
 	}
 
@@ -86,7 +99,10 @@ func main() {
 		// inherit the caller's identity. Falls back to server-level env-var
 		// auth when no Authorization header is present.
 		if authHeader := r.Header.Get("Authorization"); authHeader != "" {
-			if perReqClient := perRequestClient(apiURL, authHeader); perReqClient != nil {
+			if perReqClient := perRequestClient(
+				apiURL,
+				authHeader,
+			); perReqClient != nil {
 				perReqServer := mcp.NewServer(impl, nil)
 				registerTools(perReqServer, perReqClient)
 				return perReqServer
@@ -139,7 +155,10 @@ func perRequestClient(apiURL, authHeader string) *client.Client {
 		}
 		return client.NewWithToken(apiURL, token)
 	case strings.HasPrefix(authHeader, "Basic "):
-		raw, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(authHeader, "Basic "))
+		raw, err := base64.StdEncoding.DecodeString(
+			strings.TrimPrefix(authHeader, "Basic "),
+		)
+
 		if err != nil {
 			return nil
 		}
@@ -173,7 +192,11 @@ func withRequestLogging(next http.Handler) http.Handler {
 
 		log.Printf(
 			"mcp %s %s auth=[%s] status=%d dur=%s ua=%q",
-			r.Method, r.URL.Path, summary, rec.status, time.Since(start).Round(time.Millisecond),
+			r.Method,
+			r.URL.Path,
+			summary,
+			rec.status,
+			time.Since(start).Round(time.Millisecond),
 			truncate(r.Header.Get("User-Agent"), 40),
 		)
 	})
@@ -224,6 +247,7 @@ func summarizeAuthHeader(h string) string {
 	// debugging) but never the password.
 	if strings.EqualFold(scheme, "Basic") {
 		raw, err := base64.StdEncoding.DecodeString(tok)
+
 		if err != nil {
 			return fmt.Sprintf("Basic (undecodable base64 len=%d)", len(tok))
 		}
@@ -274,9 +298,11 @@ func decodeJWTClaims(tok string) string {
 		return ""
 	}
 	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+
 	if err != nil {
 		// Some JWTs are emitted with padding — try std url encoding too.
 		payload, err = base64.URLEncoding.DecodeString(parts[1])
+
 		if err != nil {
 			return ""
 		}
@@ -359,6 +385,7 @@ func readyzHandler(version string, c *client.Client) http.HandlerFunc {
 		status := http.StatusOK
 
 		info, err := c.Info()
+
 		if err != nil {
 			body["status"] = "degraded"
 			body["epinio_error"] = err.Error()

@@ -72,6 +72,7 @@ func RegisterConfigurationTools(server *mcp.Server, c *client.Client) {
 			input ListConfigsInput,
 		) (*mcp.CallToolResult, ListConfigsOutput, error) {
 			configs, err := c.ListConfigurations(input.Namespace)
+
 			if err != nil {
 				return nil, ListConfigsOutput{}, fmt.Errorf("list configurations: %w", err)
 			}
@@ -102,10 +103,13 @@ func RegisterConfigurationTools(server *mcp.Server, c *client.Client) {
 			req *mcp.CallToolRequest,
 			input CreateConfigInput,
 		) (*mcp.CallToolResult, CreateConfigOutput, error) {
-			if err := c.CreateConfiguration(input.Namespace, client.ConfigurationCreateRequest{
-				Name: input.Name,
-				Data: input.Data,
-			}); err != nil {
+			if err := c.CreateConfiguration(
+				input.Namespace,
+				client.ConfigurationCreateRequest{
+					Name: input.Name,
+					Data: input.Data,
+				},
+			); err != nil {
 				return nil, CreateConfigOutput{}, fmt.Errorf("create configuration: %w", err)
 			}
 			return nil, CreateConfigOutput{
@@ -130,7 +134,10 @@ func RegisterConfigurationTools(server *mcp.Server, c *client.Client) {
 			req *mcp.CallToolRequest,
 			input DeleteConfigInput,
 		) (*mcp.CallToolResult, DeleteConfigOutput, error) {
-			if err := c.DeleteConfiguration(input.Namespace, input.Name); err != nil {
+			if err := c.DeleteConfiguration(
+				input.Namespace,
+				input.Name,
+			); err != nil {
 				return nil, DeleteConfigOutput{}, fmt.Errorf("delete configuration: %w", err)
 			}
 			return nil, DeleteConfigOutput{
@@ -158,10 +165,19 @@ func RegisterConfigurationTools(server *mcp.Server, c *client.Client) {
 			req *mcp.CallToolRequest,
 			input BindConfigInput,
 		) (*mcp.CallToolResult, BindConfigOutput, error) {
-			if err := appMutationGuard.EnsureMutable(ctx, input.Namespace, input.App, "bind_configuration"); err != nil {
+			if err := appMutationGuard.EnsureMutable(
+				ctx,
+				input.Namespace,
+				input.App,
+				"bind_configuration",
+			); err != nil {
 				return nil, BindConfigOutput{}, err
 			}
-			if err := c.BindConfiguration(input.Namespace, input.App, input.Configurations); err != nil {
+			if err := c.BindConfiguration(
+				input.Namespace,
+				input.App,
+				input.Configurations,
+			); err != nil {
 				return nil, BindConfigOutput{}, fmt.Errorf("bind configuration: %w", err)
 			}
 			return nil, BindConfigOutput{
@@ -188,10 +204,19 @@ func RegisterConfigurationTools(server *mcp.Server, c *client.Client) {
 			req *mcp.CallToolRequest,
 			input UnbindConfigInput,
 		) (*mcp.CallToolResult, UnbindConfigOutput, error) {
-			if err := appMutationGuard.EnsureMutable(ctx, input.Namespace, input.App, "unbind_configuration"); err != nil {
+			if err := appMutationGuard.EnsureMutable(
+				ctx,
+				input.Namespace,
+				input.App,
+				"unbind_configuration",
+			); err != nil {
 				return nil, UnbindConfigOutput{}, err
 			}
-			if err := c.UnbindConfiguration(input.Namespace, input.App, input.Configuration); err != nil {
+			if err := c.UnbindConfiguration(
+				input.Namespace,
+				input.App,
+				input.Configuration,
+			); err != nil {
 				return nil, UnbindConfigOutput{}, fmt.Errorf("unbind configuration: %w", err)
 			}
 			return nil, UnbindConfigOutput{

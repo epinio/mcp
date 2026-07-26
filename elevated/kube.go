@@ -63,16 +63,19 @@ var (
 func GetKubeClient() (*KubeClient, error) {
 	kubeOnce.Do(func() {
 		cfg, err := rest.InClusterConfig()
+
 		if err != nil {
 			kubeErr = fmt.Errorf("in-cluster kubeconfig: %w", err)
 			return
 		}
 		typed, err := kubernetes.NewForConfig(cfg)
+
 		if err != nil {
 			kubeErr = fmt.Errorf("typed kube client: %w", err)
 			return
 		}
 		dyn, err := dynamic.NewForConfig(cfg)
+
 		if err != nil {
 			kubeErr = fmt.Errorf("dynamic kube client: %w", err)
 			return
@@ -84,7 +87,10 @@ func GetKubeClient() (*KubeClient, error) {
 
 // CanI performs a SelfSubjectAccessReview against the pod's ServiceAccount.
 // The namespace is optional — pass "" for cluster-scope resources.
-func (k *KubeClient) CanI(ctx context.Context, verb, group, resource, namespace string) (bool, error) {
+func (k *KubeClient) CanI(
+	ctx context.Context,
+	verb, group, resource, namespace string,
+) (bool, error) {
 	review := &authv1.SelfSubjectAccessReview{
 		Spec: authv1.SelfSubjectAccessReviewSpec{
 			ResourceAttributes: &authv1.ResourceAttributes{
@@ -98,6 +104,7 @@ func (k *KubeClient) CanI(ctx context.Context, verb, group, resource, namespace 
 	resp, err := k.Typed.AuthorizationV1().
 		SelfSubjectAccessReviews().
 		Create(ctx, review, metav1.CreateOptions{})
+
 	if err != nil {
 		return false, fmt.Errorf("SSAR: %w", err)
 	}
@@ -114,7 +121,10 @@ var EpinioAppGVR = schema.GroupVersionResource{
 // ReadEpinioApp fetches the Epinio Application CRD for the given namespace/name.
 // Returns the raw unstructured object so callers can pull specific spec fields
 // spec fields without binding to an Epinio-typed dependency.
-func (k *KubeClient) ReadEpinioApp(ctx context.Context, namespace, name string) (*unstructured.Unstructured, error) {
+func (k *KubeClient) ReadEpinioApp(
+	ctx context.Context,
+	namespace, name string,
+) (*unstructured.Unstructured, error) {
 	return k.Dynamic.Resource(EpinioAppGVR).
 		Namespace(namespace).
 		Get(ctx, name, metav1.GetOptions{})
@@ -122,8 +132,12 @@ func (k *KubeClient) ReadEpinioApp(ctx context.Context, namespace, name string) 
 
 // IsAppAdopted returns true when the App CRD carries the
 // epinio.io/adopted annotation set to "true".
-func (k *KubeClient) IsAppAdopted(ctx context.Context, namespace, name string) (bool, error) {
+func (k *KubeClient) IsAppAdopted(
+	ctx context.Context,
+	namespace, name string,
+) (bool, error) {
 	app, err := k.ReadEpinioApp(ctx, namespace, name)
+
 	if err != nil {
 		return false, err
 	}
@@ -135,7 +149,10 @@ func (k *KubeClient) IsAppAdopted(ctx context.Context, namespace, name string) (
 // The object is expected to carry apiVersion/kind/metadata/spec as usual.
 // Uses the AdoptionFieldManager so writes from the MCP don't fight Epinio's
 // own REST-driven writes for ownership.
-func (k *KubeClient) WriteEpinioApp(ctx context.Context, obj *unstructured.Unstructured) error {
+func (k *KubeClient) WriteEpinioApp(
+	ctx context.Context,
+	obj *unstructured.Unstructured,
+) error {
 	if obj.GetAPIVersion() == "" {
 		obj.SetAPIVersion("application.epinio.io/v1")
 	}
@@ -143,23 +160,38 @@ func (k *KubeClient) WriteEpinioApp(ctx context.Context, obj *unstructured.Unstr
 		obj.SetKind("App")
 	}
 	data, err := json.Marshal(obj.Object)
+
 	if err != nil {
 		return fmt.Errorf("marshal app: %w", err)
 	}
 	_, err = k.Dynamic.Resource(EpinioAppGVR).
 		Namespace(obj.GetNamespace()).
-		Patch(ctx, obj.GetName(), types.ApplyPatchType, data, metav1.PatchOptions{
-			FieldManager: AdoptionFieldManager,
-			Force:        ptr(true),
-		})
+		Patch(
+			ctx,
+			obj.GetName(),
+			types.ApplyPatchType,
+			data,
+			metav1.PatchOptions{
+				FieldManager: AdoptionFieldManager,
+				Force:        ptr(true),
+			},
+		)
 	if err != nil {
-		return fmt.Errorf("apply app %q in %q: %w", obj.GetName(), obj.GetNamespace(), err)
+		return fmt.Errorf(
+			"apply app %q in %q: %w",
+			obj.GetName(),
+			obj.GetNamespace(),
+			err,
+		)
 	}
 	return nil
 }
 
 // DeleteEpinioApp removes an App CRD. Returns nil on NotFound.
-func (k *KubeClient) DeleteEpinioApp(ctx context.Context, namespace, name string) error {
+func (k *KubeClient) DeleteEpinioApp(
+	ctx context.Context,
+	namespace, name string,
+) error {
 	err := k.Dynamic.Resource(EpinioAppGVR).
 		Namespace(namespace).
 		Delete(ctx, name, metav1.DeleteOptions{})
@@ -170,19 +202,35 @@ func (k *KubeClient) DeleteEpinioApp(ctx context.Context, namespace, name string
 }
 
 // GetDeployment fetches a Deployment via the typed client.
-func (k *KubeClient) GetDeployment(ctx context.Context, namespace, name string) (*appsv1.Deployment, error) {
-	return k.Typed.AppsV1().Deployments(namespace).Get(ctx, name, metav1.GetOptions{})
+func (k *KubeClient) GetDeployment(
+	ctx context.Context,
+	namespace, name string,
+) (*appsv1.Deployment, error) {
+	return k.Typed.AppsV1().
+		Deployments(namespace).
+		Get(ctx, name, metav1.GetOptions{})
 }
 
 // GetService fetches a Service via the typed client.
-func (k *KubeClient) GetService(ctx context.Context, namespace, name string) (*corev1.Service, error) {
-	return k.Typed.CoreV1().Services(namespace).Get(ctx, name, metav1.GetOptions{})
+func (k *KubeClient) GetService(
+	ctx context.Context,
+	namespace, name string,
+) (*corev1.Service, error) {
+	return k.Typed.CoreV1().
+		Services(namespace).
+		Get(ctx, name, metav1.GetOptions{})
 }
 
 // ListIngresses lists Ingresses in a namespace. Used by reconcile_app to
 // derive routes from Ingress hosts targeting the app's Service.
-func (k *KubeClient) ListIngresses(ctx context.Context, namespace string) ([]networkingv1.Ingress, error) {
-	list, err := k.Typed.NetworkingV1().Ingresses(namespace).List(ctx, metav1.ListOptions{})
+func (k *KubeClient) ListIngresses(
+	ctx context.Context,
+	namespace string,
+) ([]networkingv1.Ingress, error) {
+	list, err := k.Typed.NetworkingV1().
+		Ingresses(namespace).
+		List(ctx, metav1.ListOptions{})
+
 	if err != nil {
 		return nil, fmt.Errorf("list ingresses in %q: %w", namespace, err)
 	}
@@ -216,15 +264,26 @@ func labelPatchPayload(labels, annotations map[string]string) ([]byte, error) {
 // LabelDeployment applies labels + annotations to a Deployment's
 // metadata via strategic merge patch. Pass nil for a map to leave that
 // dimension untouched.
-func (k *KubeClient) LabelDeployment(ctx context.Context, namespace, name string, labels, annotations map[string]string) error {
+func (k *KubeClient) LabelDeployment(
+	ctx context.Context,
+	namespace, name string,
+	labels, annotations map[string]string,
+) error {
 	patch, err := labelPatchPayload(labels, annotations)
+
 	if err != nil {
 		return fmt.Errorf("build deployment patch: %w", err)
 	}
 	_, err = k.Typed.AppsV1().Deployments(namespace).
-		Patch(ctx, name, types.StrategicMergePatchType, patch, metav1.PatchOptions{
-			FieldManager: AdoptionFieldManager,
-		})
+		Patch(
+			ctx,
+			name,
+			types.StrategicMergePatchType,
+			patch,
+			metav1.PatchOptions{
+				FieldManager: AdoptionFieldManager,
+			},
+		)
 	if err != nil {
 		return fmt.Errorf("patch deployment %q in %q: %w", name, namespace, err)
 	}
@@ -235,7 +294,11 @@ func (k *KubeClient) LabelDeployment(ctx context.Context, namespace, name string
 // template (spec.template.metadata) of a Deployment. Epinio's pod-level
 // discovery (`epinio.io/app-container`, etc.) requires labels on the
 // pod template, not just the Deployment itself.
-func (k *KubeClient) LabelDeploymentPodTemplate(ctx context.Context, namespace, name string, labels, annotations map[string]string) error {
+func (k *KubeClient) LabelDeploymentPodTemplate(
+	ctx context.Context,
+	namespace, name string,
+	labels, annotations map[string]string,
+) error {
 	patch := map[string]interface{}{
 		"spec": map[string]interface{}{
 			"template": map[string]interface{}{
@@ -247,29 +310,52 @@ func (k *KubeClient) LabelDeploymentPodTemplate(ctx context.Context, namespace, 
 		},
 	}
 	data, err := json.Marshal(patch)
+
 	if err != nil {
 		return fmt.Errorf("build pod-template patch: %w", err)
 	}
 	_, err = k.Typed.AppsV1().Deployments(namespace).
-		Patch(ctx, name, types.StrategicMergePatchType, data, metav1.PatchOptions{
-			FieldManager: AdoptionFieldManager,
-		})
+		Patch(
+			ctx,
+			name,
+			types.StrategicMergePatchType,
+			data,
+			metav1.PatchOptions{
+				FieldManager: AdoptionFieldManager,
+			},
+		)
 	if err != nil {
-		return fmt.Errorf("patch deployment pod template %q in %q: %w", name, namespace, err)
+		return fmt.Errorf(
+			"patch deployment pod template %q in %q: %w",
+			name,
+			namespace,
+			err,
+		)
 	}
 	return nil
 }
 
 // LabelService applies labels + annotations to a Service's metadata.
-func (k *KubeClient) LabelService(ctx context.Context, namespace, name string, labels, annotations map[string]string) error {
+func (k *KubeClient) LabelService(
+	ctx context.Context,
+	namespace, name string,
+	labels, annotations map[string]string,
+) error {
 	patch, err := labelPatchPayload(labels, annotations)
+
 	if err != nil {
 		return fmt.Errorf("build service patch: %w", err)
 	}
 	_, err = k.Typed.CoreV1().Services(namespace).
-		Patch(ctx, name, types.StrategicMergePatchType, patch, metav1.PatchOptions{
-			FieldManager: AdoptionFieldManager,
-		})
+		Patch(
+			ctx,
+			name,
+			types.StrategicMergePatchType,
+			patch,
+			metav1.PatchOptions{
+				FieldManager: AdoptionFieldManager,
+			},
+		)
 	if err != nil {
 		return fmt.Errorf("patch service %q in %q: %w", name, namespace, err)
 	}
@@ -277,14 +363,24 @@ func (k *KubeClient) LabelService(ctx context.Context, namespace, name string, l
 }
 
 // GetSecret fetches a Secret via the typed client.
-func (k *KubeClient) GetSecret(ctx context.Context, namespace, name string) (*corev1.Secret, error) {
-	return k.Typed.CoreV1().Secrets(namespace).Get(ctx, name, metav1.GetOptions{})
+func (k *KubeClient) GetSecret(
+	ctx context.Context,
+	namespace, name string,
+) (*corev1.Secret, error) {
+	return k.Typed.CoreV1().
+		Secrets(namespace).
+		Get(ctx, name, metav1.GetOptions{})
 }
 
 // WriteSecret creates or updates a Secret. Existing keys not in `data` are
 // preserved (merge semantics); to remove a key, update with an empty value
 // and handle removal explicitly.
-func (k *KubeClient) WriteSecret(ctx context.Context, namespace, name string, data map[string][]byte, labels, annotations map[string]string) error {
+func (k *KubeClient) WriteSecret(
+	ctx context.Context,
+	namespace, name string,
+	data map[string][]byte,
+	labels, annotations map[string]string,
+) error {
 	secrets := k.Typed.CoreV1().Secrets(namespace)
 	existing, err := secrets.Get(ctx, name, metav1.GetOptions{})
 	if err != nil && !apierrors.IsNotFound(err) {
@@ -304,7 +400,12 @@ func (k *KubeClient) WriteSecret(ctx context.Context, namespace, name string, da
 		if _, err := secrets.Create(ctx, sec, metav1.CreateOptions{
 			FieldManager: AdoptionFieldManager,
 		}); err != nil {
-			return fmt.Errorf("create secret %q in %q: %w", name, namespace, err)
+			return fmt.Errorf(
+				"create secret %q in %q: %w",
+				name,
+				namespace,
+				err,
+			)
 		}
 		return nil
 	}
@@ -344,7 +445,10 @@ func (k *KubeClient) WriteSecret(ctx context.Context, namespace, name string, da
 // mechanism `kubectl rollout restart` uses. The value is the current RFC3339
 // timestamp so each invocation produces a distinct patch and guarantees a
 // new rollout.
-func (k *KubeClient) RestartDeployment(ctx context.Context, namespace, name string) error {
+func (k *KubeClient) RestartDeployment(
+	ctx context.Context,
+	namespace, name string,
+) error {
 	annotations := map[string]string{
 		"kubectl.kubernetes.io/restartedAt": time.Now().UTC().Format(time.RFC3339),
 	}
@@ -354,7 +458,11 @@ func (k *KubeClient) RestartDeployment(ctx context.Context, namespace, name stri
 // RemoveLabels removes the given label keys from a Deployment's metadata
 // (not pod template) and strips matching annotations. Uses a JSON Merge
 // Patch (RFC 7396) where null values remove keys.
-func (k *KubeClient) RemoveDeploymentMetadata(ctx context.Context, namespace, name string, labelKeys, annotationKeys []string) error {
+func (k *KubeClient) RemoveDeploymentMetadata(
+	ctx context.Context,
+	namespace, name string,
+	labelKeys, annotationKeys []string,
+) error {
 	patch := buildRemovePatch(labelKeys, annotationKeys)
 	if patch == nil {
 		return nil
@@ -364,13 +472,22 @@ func (k *KubeClient) RemoveDeploymentMetadata(ctx context.Context, namespace, na
 			FieldManager: AdoptionFieldManager,
 		})
 	if err != nil && !apierrors.IsNotFound(err) {
-		return fmt.Errorf("strip metadata on deployment %q/%q: %w", namespace, name, err)
+		return fmt.Errorf(
+			"strip metadata on deployment %q/%q: %w",
+			namespace,
+			name,
+			err,
+		)
 	}
 	return nil
 }
 
 // RemoveServiceMetadata strips labels + annotations from a Service.
-func (k *KubeClient) RemoveServiceMetadata(ctx context.Context, namespace, name string, labelKeys, annotationKeys []string) error {
+func (k *KubeClient) RemoveServiceMetadata(
+	ctx context.Context,
+	namespace, name string,
+	labelKeys, annotationKeys []string,
+) error {
 	patch := buildRemovePatch(labelKeys, annotationKeys)
 	if patch == nil {
 		return nil
@@ -380,7 +497,12 @@ func (k *KubeClient) RemoveServiceMetadata(ctx context.Context, namespace, name 
 			FieldManager: AdoptionFieldManager,
 		})
 	if err != nil && !apierrors.IsNotFound(err) {
-		return fmt.Errorf("strip metadata on service %q/%q: %w", namespace, name, err)
+		return fmt.Errorf(
+			"strip metadata on service %q/%q: %w",
+			namespace,
+			name,
+			err,
+		)
 	}
 	return nil
 }
@@ -408,6 +530,7 @@ func buildRemovePatch(labelKeys, annotationKeys []string) []byte {
 	}
 	patch := map[string]interface{}{"metadata": metadata}
 	data, err := json.Marshal(patch)
+
 	if err != nil {
 		return nil
 	}
