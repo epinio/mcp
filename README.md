@@ -14,6 +14,10 @@ images, and catalog services. A single elevated capability set that reaches
 directly into Kubernetes — workload **adoption** — is **off by default** and
 opt-in via the `EPINIO_MCP_ELEVATED` flag. See the reference docs.
 
+**Requires Epinio 1.14.1 or later.** The server depends on the builder-image,
+catalog-service, and app-chart CRUD API and the source-retrieval endpoint, all
+introduced in Epinio 1.14.1; it will not work against earlier releases.
+
 ## Documentation
 
 Full documentation lives at **[docs.epinio.io](https://docs.epinio.io)**:
