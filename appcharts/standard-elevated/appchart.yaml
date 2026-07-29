@@ -7,14 +7,14 @@ spec:
   shortDescription: Standard chart with elevated RBAC (app CRD read, registry access)
   description: |
     Extends the standard Epinio app chart with a per-app ServiceAccount that has:
-    - Read access to apps.application.epinio.io CRDs (for blobuid/source retrieval)
+    - Read access to apps.application.epinio.io CRDs (for the adoption tools)
     - Registry pull credentials (registry-creds imagePullSecret)
 
     Use this chart for apps that need to query Epinio app metadata or interact
     with the internal container registry.
 
-    NOTE: The app CRD read access is a workaround until Epinio exposes blobuid
-    in the REST API. The appCrdAccess setting can be disabled when that lands.
+    Only the MCP's elevated install (workload adoption) needs this chart; the
+    core install uses the stock standard chart.
   helmChart: http://chart-server.epinio.svc.cluster.local/charts/epinio-application-0.1.26.tgz
   settings:
     appListeningPort:

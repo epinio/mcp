@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/krumware/epinio-mcp/client"
+	"github.com/epinio/mcp/client"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -37,7 +37,7 @@ type CatalogSummary struct {
 	Name             string         `json:"name"`
 	Description      string         `json:"description"`
 	ShortDescription string         `json:"short_description"`
-	HelmChart        string         `json:"helm_chart,omitempty"`
+	HelmChart        string         `json:"chart,omitempty"`
 	ChartVersion     string         `json:"chart_version"`
 	AppVersion       string         `json:"app_version"`
 	Settings         map[string]any `json:"settings,omitempty"`
@@ -87,6 +87,13 @@ type UnbindServiceOutput struct {
 }
 
 func summarizeCatalog(cs client.CatalogService) CatalogSummary {
+	var settings map[string]any
+	if len(cs.Settings) > 0 {
+		settings = make(map[string]any, len(cs.Settings))
+		for k, v := range cs.Settings {
+			settings[k] = v
+		}
+	}
 	return CatalogSummary{
 		Name:             cs.Meta.Name,
 		Description:      cs.Description,
@@ -94,7 +101,7 @@ func summarizeCatalog(cs client.CatalogService) CatalogSummary {
 		HelmChart:        cs.HelmChart,
 		ChartVersion:     cs.ChartVersion,
 		AppVersion:       cs.AppVersion,
-		Settings:         cs.Settings,
+		Settings:         settings,
 	}
 }
 
@@ -112,6 +119,7 @@ func RegisterServiceTools(server *mcp.Server, c *client.Client) {
 			input ListServicesInput,
 		) (*mcp.CallToolResult, ListServicesOutput, error) {
 			services, err := c.ListServices(input.Namespace)
+
 			if err != nil {
 				return nil, ListServicesOutput{}, fmt.Errorf("list services: %w", err)
 			}
@@ -145,6 +153,7 @@ func RegisterServiceTools(server *mcp.Server, c *client.Client) {
 			input ListCatalogInput,
 		) (*mcp.CallToolResult, ListCatalogOutput, error) {
 			catalog, err := c.ListCatalogServices()
+
 			if err != nil {
 				return nil, ListCatalogOutput{}, fmt.Errorf("list catalog: %w", err)
 			}
@@ -171,6 +180,7 @@ func RegisterServiceTools(server *mcp.Server, c *client.Client) {
 			input ShowCatalogServiceInput,
 		) (*mcp.CallToolResult, ShowCatalogServiceOutput, error) {
 			cs, err := c.ShowCatalogService(input.Name)
+
 			if err != nil {
 				return nil, ShowCatalogServiceOutput{}, fmt.Errorf("show catalog service: %w", err)
 			}
@@ -190,11 +200,12 @@ func RegisterServiceTools(server *mcp.Server, c *client.Client) {
 			req *mcp.CallToolRequest,
 			input CreateServiceInput,
 		) (*mcp.CallToolResult, CreateServiceOutput, error) {
-			if err := c.CreateService(input.Namespace, client.ServiceCreateRequest{
+			err := c.CreateService(input.Namespace, client.ServiceCreateRequest{
 				CatalogService: input.CatalogService,
 				Name:           input.Name,
 				Settings:       input.Settings,
-			}); err != nil {
+			})
+			if err != nil {
 				return nil, CreateServiceOutput{}, fmt.Errorf("create service: %w", err)
 			}
 			return nil, CreateServiceOutput{

@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/krumware/epinio-mcp/client"
+	"github.com/epinio/mcp/client"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -57,6 +57,7 @@ func RegisterCloneTools(server *mcp.Server, c *client.Client) {
 				ns = "workspace"
 			}
 			app, err := c.ShowApp(ns, input.Name)
+
 			if err != nil {
 				return nil, GetAppManifestOutput{}, fmt.Errorf("get app: %w", err)
 			}
@@ -98,8 +99,13 @@ func RegisterCloneTools(server *mcp.Server, c *client.Client) {
 			}
 
 			source, err := c.ShowApp(sourceNs, input.SourceName)
+
 			if err != nil {
-				return nil, CloneAppOutput{}, fmt.Errorf("get source app %q: %w", input.SourceName, err)
+				return nil, CloneAppOutput{}, fmt.Errorf(
+					"get source app %q: %w",
+					input.SourceName,
+					err,
+				)
 			}
 			if source.ImageURL == "" {
 				return nil, CloneAppOutput{}, fmt.Errorf(
@@ -121,11 +127,21 @@ func RegisterCloneTools(server *mcp.Server, c *client.Client) {
 			}
 
 			if err := c.CreateApp(targetNs, createReq); err != nil {
-				return nil, CloneAppOutput{}, fmt.Errorf("create target app %q: %w", input.TargetName, err)
+				return nil, CloneAppOutput{}, fmt.Errorf(
+					"create target app %q: %w",
+					input.TargetName,
+					err,
+				)
 			}
 
 			if len(source.Configuration.Environment) > 0 {
-				if err := c.SetEnv(targetNs, input.TargetName, source.Configuration.Environment); err != nil {
+				err := c.SetEnv(
+					targetNs,
+					input.TargetName,
+					source.Configuration.Environment,
+				)
+
+				if err != nil {
 					return nil, CloneAppOutput{}, fmt.Errorf(
 						"created app but failed to copy env vars: %w",
 						err,
@@ -144,10 +160,19 @@ func RegisterCloneTools(server *mcp.Server, c *client.Client) {
 				ImageURL: source.ImageURL,
 				Origin: client.ApplicationOrigin{
 					Kind: 0,
-					Path: fmt.Sprintf("cloned from %s/%s", sourceNs, input.SourceName),
+					Path: fmt.Sprintf(
+						"cloned from %s/%s",
+						sourceNs,
+						input.SourceName,
+					),
 				},
 			}
-			deployResp, err := c.DeployApp(targetNs, input.TargetName, deployReq)
+			deployResp, err := c.DeployApp(
+				targetNs,
+				input.TargetName,
+				deployReq,
+			)
+
 			if err != nil {
 				return nil, CloneAppOutput{}, fmt.Errorf("deploy failed: %w", err)
 			}

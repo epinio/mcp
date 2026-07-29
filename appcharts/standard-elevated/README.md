@@ -1,6 +1,6 @@
 # standard-elevated AppChart
 
-An Epinio AppChart that extends the standard chart with elevated RBAC — specifically, read access to `apps.application.epinio.io` CRDs and pull access to the internal registry. The Epinio MCP server uses this chart so it can read `spec.blobuid` from app CRDs to retrieve source tarballs from S3.
+An Epinio AppChart that extends the standard chart with elevated RBAC — specifically, read access to `apps.application.epinio.io` CRDs and pull access to the internal registry. The Epinio MCP server uses this chart for its elevated adoption tools and the `self_adoption` capability, which read Epinio Application CRDs directly.
 
 ## Why this isn't in the Epinio Helm charts repo
 
@@ -14,7 +14,7 @@ This chart grants cluster-level RBAC to every app deployed with it. That's inten
 
 ## The chart tarball is already embedded
 
-For normal installs you don't need to package this chart. The compiled tarball is already baked into `manifests/chart-server.yaml` as base64 ConfigMap data. Just apply that manifest — see `INSTALL.md` for the full flow.
+You don't need to package this chart by hand. The compiled tarball is already baked into `manifests/chart-server.yaml` as base64 ConfigMap data, and `make cluster-prep` applies it as part of the elevated install (`make elevated-setup`).
 
 ## Rebuilding the tarball (if you modify the chart)
 

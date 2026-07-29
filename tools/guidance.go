@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/krumware/epinio-mcp/client"
+	"github.com/epinio/mcp/client"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -51,7 +51,7 @@ var guidanceTopics = []guidanceTopic{
 	{
 		Key:         "pick_builder",
 		Title:       "Choose a buildpack builder image",
-		Description: "Guidance on selecting `builder_image` for push_app / upload_and_stage. Cross-reference the live list via the list_builders tool.",
+		Description: "Guidance on selecting `builder_image` for push_app / upload_and_stage. Cross-reference the live list via the list_builder_images tool.",
 		Render:      func(string) string { return pickBuilderBody },
 	},
 	{
@@ -101,7 +101,7 @@ func renderDeployGuide(language string) string {
 		body.WriteString(deployGuidePython)
 	default:
 		body.WriteString("\n\n")
-		body.WriteString(fmt.Sprintf("(No language-specific section for %q — see list_builders for supported ecosystems.)", language))
+		body.WriteString(fmt.Sprintf("(No language-specific section for %q — see list_builder_images for supported ecosystems.)", language))
 	}
 	return body.String()
 }
@@ -113,13 +113,13 @@ func renderDeployGuide(language string) string {
 const bt = "`"
 
 var (
-	deployGuideCommon     = useBackticks(deployGuideCommonRaw)
-	deployGuideNode       = useBackticks(deployGuideNodeRaw)
-	deployGuideNext       = useBackticks(deployGuideNextRaw)
-	deployGuideGo         = useBackticks(deployGuideGoRaw)
-	deployGuidePython     = useBackticks(deployGuidePythonRaw)
-	pickAppchartBody      = useBackticks(pickAppchartBodyRaw)
-	pickBuilderBody       = useBackticks(pickBuilderBodyRaw)
+	deployGuideCommon       = useBackticks(deployGuideCommonRaw)
+	deployGuideNode         = useBackticks(deployGuideNodeRaw)
+	deployGuideNext         = useBackticks(deployGuideNextRaw)
+	deployGuideGo           = useBackticks(deployGuideGoRaw)
+	deployGuidePython       = useBackticks(deployGuidePythonRaw)
+	pickAppchartBody        = useBackticks(pickAppchartBodyRaw)
+	pickBuilderBody         = useBackticks(pickBuilderBodyRaw)
 	troubleshootStagingBody = useBackticks(troubleshootStagingBodyRaw)
 )
 
@@ -145,7 +145,7 @@ buildpack matches first gets to build the app.
 - **App name** must be lowercase, alphanumeric + hyphens only.
 - **Deploy namespace** can be any Epinio namespace the caller has access to;
   default is @workspace@. List namespaces with the list_namespaces tool.
-- Use @list_appcharts@ and @list_builders@ to see what's actually available
+- Use @list_appcharts@ and @list_builder_images@ to see what's actually available
   on the target cluster — don't hard-code guesses.`
 
 const deployGuideNodeRaw = `## Node.js
@@ -219,7 +219,7 @@ When you push, the builder detects your source's language/framework and runs
 the matching buildpack. The exact image you pass is the @builder_image@
 argument to push_app / upload_and_stage.
 
-**Always cross-reference** @list_builders@ for the current authoritative set
+**Always cross-reference** @list_builder_images@ for the current authoritative set
 usable on-cluster. The known builders at the time of writing:
 
 - **paketobuildpacks/builder-jammy-full:0.3.606** (default) — kitchen-sink
@@ -290,7 +290,11 @@ func renderGuidance(topic, language string) (string, string, error) {
 			available = append(available, x.Key)
 		}
 		sort.Strings(available)
-		return "", "", fmt.Errorf("unknown topic %q — available: %s", topic, strings.Join(available, ", "))
+		return "", "", fmt.Errorf(
+			"unknown topic %q — available: %s",
+			topic,
+			strings.Join(available, ", "),
+		)
 	}
 	return t.Title, t.Render(language), nil
 }
@@ -334,12 +338,16 @@ func RegisterGuidanceTools(server *mcp.Server, _ *client.Client) {
 				},
 			}
 		}
-		server.AddPrompt(prompt, func(ctx context.Context, req *mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
+		server.AddPrompt(prompt, func(
+			ctx context.Context,
+			req *mcp.GetPromptRequest,
+		) (*mcp.GetPromptResult, error) {
 			language := ""
 			if req.Params != nil {
 				language = req.Params.Arguments["language"]
 			}
 			title, body, err := renderGuidance(topic.Key, language)
+
 			if err != nil {
 				return nil, err
 			}
@@ -372,6 +380,7 @@ func RegisterGuidanceTools(server *mcp.Server, _ *client.Client) {
 			input GetBuildGuidanceInput,
 		) (*mcp.CallToolResult, GetBuildGuidanceOutput, error) {
 			title, body, err := renderGuidance(input.Topic, input.Language)
+
 			if err != nil {
 				return nil, GetBuildGuidanceOutput{}, err
 			}

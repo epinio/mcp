@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/krumware/epinio-mcp/client"
+	"github.com/epinio/mcp/client"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -55,14 +55,6 @@ type ShowAppOutput struct {
 	Configs       []string          `json:"configurations,omitempty"`
 	Origin        string            `json:"origin"`
 	CreatedAt     string            `json:"created_at"`
-	// Adopted is true when the app carries the epinio.io/adopted annotation
-	// on its App CRD — meaning it was applied via kubectl rather than
-	// deployed through Epinio's REST API. Destructive Epinio operations
-	// are refused on adopted apps (see Advisory).
-	Adopted bool `json:"adopted,omitempty"`
-	// Advisory carries a human-readable note about the app's management
-	// mode, populated when Adopted is true. Empty for normally-managed apps.
-	Advisory string `json:"advisory,omitempty"`
 }
 
 type CreateAppInput struct {
@@ -188,6 +180,7 @@ func RegisterAppTools(server *mcp.Server, c *client.Client) {
 			input ShowAppInput,
 		) (*mcp.CallToolResult, ShowAppOutput, error) {
 			app, err := c.ShowApp(input.Namespace, input.Name)
+
 			if err != nil {
 				return nil, ShowAppOutput{}, fmt.Errorf("show app: %w", err)
 			}
@@ -212,14 +205,6 @@ func RegisterAppTools(server *mcp.Server, c *client.Client) {
 			if app.Configuration.Instances != nil {
 				out.Instances = int(*app.Configuration.Instances)
 			}
-			// Decorate with adoption advisory. Silent if the K8s client isn't
-			// available (local dev) — the advisory is informational.
-			if k, err := client.GetKubeClient(); err == nil {
-				if adopted, _ := k.IsAppAdopted(ctx, input.Namespace, input.Name); adopted {
-					out.Adopted = true
-					out.Advisory = describeAdopted()
-				}
-			}
 			return nil, out, nil
 		},
 	)
@@ -229,7 +214,7 @@ func RegisterAppTools(server *mcp.Server, c *client.Client) {
 		&mcp.Tool{
 			Name:        "create_app",
 			Annotations: &mcp.ToolAnnotations{Title: "Create App"},
-			Description: "Create a new Epinio application (does not deploy it — use push_app for that)",
+			Description: "Create a new Epinio application",
 		},
 		func(
 			ctx context.Context,
@@ -260,20 +245,26 @@ func RegisterAppTools(server *mcp.Server, c *client.Client) {
 		&mcp.Tool{
 			Name:        "delete_app",
 			Annotations: &mcp.ToolAnnotations{Title: "Delete App"},
-			Description: "Delete an Epinio application. Refused on adopted apps — " +
-				"use `release_app` + `kubectl delete` instead.",
+			Description: "Delete an Epinio application.",
 		},
 		func(
 			ctx context.Context,
 			req *mcp.CallToolRequest,
 			input DeleteAppInput,
 		) (*mcp.CallToolResult, DeleteAppOutput, error) {
-			if err := EnsureNotAdopted(ctx, input.Namespace, input.Name, "delete_app"); err != nil {
+			if err := appMutationGuard.EnsureMutable(
+				ctx,
+				input.Namespace,
+				input.Name,
+				"delete_app",
+			); err != nil {
 				return nil, DeleteAppOutput{}, err
 			}
+
 			if err := c.DeleteApp(input.Namespace, input.Name); err != nil {
 				return nil, DeleteAppOutput{}, fmt.Errorf("delete app: %w", err)
 			}
+
 			return nil, DeleteAppOutput{
 				Status: fmt.Sprintf(
 					"app %q deleted from namespace %q",
@@ -289,15 +280,19 @@ func RegisterAppTools(server *mcp.Server, c *client.Client) {
 		&mcp.Tool{
 			Name:        "restart_app",
 			Annotations: &mcp.ToolAnnotations{Title: "Restart App"},
-			Description: "Restart an Epinio application. Refused on adopted apps — " +
-				"use `kubectl rollout restart deployment/<name>` instead.",
+			Description: "Restart an Epinio application.",
 		},
 		func(
 			ctx context.Context,
 			req *mcp.CallToolRequest,
 			input RestartAppInput,
 		) (*mcp.CallToolResult, RestartAppOutput, error) {
-			if err := EnsureNotAdopted(ctx, input.Namespace, input.Name, "restart_app"); err != nil {
+			if err := appMutationGuard.EnsureMutable(
+				ctx,
+				input.Namespace,
+				input.Name,
+				"restart_app",
+			); err != nil {
 				return nil, RestartAppOutput{}, err
 			}
 			if err := c.RestartApp(input.Namespace, input.Name); err != nil {
@@ -319,7 +314,7 @@ func RegisterAppTools(server *mcp.Server, c *client.Client) {
 			Name:        "scale_app",
 			Annotations: &mcp.ToolAnnotations{Title: "Scale App"},
 			Description: "Scale an Epinio application to a desired instance count. " +
-				"A thin wrapper over update_app for the common case. Refused on adopted apps.",
+				"A thin wrapper over update_app for the common case.",
 		},
 		func(
 			ctx context.Context,
@@ -332,7 +327,7 @@ func RegisterAppTools(server *mcp.Server, c *client.Client) {
 					input.Instances,
 				)
 			}
-			if err := EnsureNotAdopted(ctx, input.Namespace, input.Name, "scale_app"); err != nil {
+			if err := appMutationGuard.EnsureMutable(ctx, input.Namespace, input.Name, "scale_app"); err != nil {
 				return nil, ScaleAppOutput{}, err
 			}
 			n := input.Instances
@@ -360,15 +355,14 @@ func RegisterAppTools(server *mcp.Server, c *client.Client) {
 			Description: "Update an Epinio application's configuration (instances, " +
 				"routes, environment, configurations, appchart, settings). Any " +
 				"omitted field is left unchanged. Pass restart=true to roll pods " +
-				"after the update. Refused on adopted apps — use kubectl for " +
-				"configuration changes.",
+				"after the update.",
 		},
 		func(
 			ctx context.Context,
 			req *mcp.CallToolRequest,
 			input UpdateAppInput,
 		) (*mcp.CallToolResult, UpdateAppOutput, error) {
-			if err := EnsureNotAdopted(ctx, input.Namespace, input.Name, "update_app"); err != nil {
+			if err := appMutationGuard.EnsureMutable(ctx, input.Namespace, input.Name, "update_app"); err != nil {
 				return nil, UpdateAppOutput{}, err
 			}
 			upd := client.AppUpdateRequest{

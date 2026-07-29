@@ -7,9 +7,8 @@
 #   kubectl apply -f install/epinio-mcp.yaml
 #
 # Next: chat with the MCP and run `enable_capability(name="self_adoption")`
-# to have it finish its own setup (fill adoption metadata, create the
-# s3-gateway catalog service + instance if needed, populate its own S3
-# credentials, and restart itself). See install/README.md for the full flow.
+# to have it finish its own setup (fill in its adoption metadata). See the
+# Epinio docs for the full flow.
 #
 # This install deploys the MCP as a plain Kubernetes workload *and*
 # creates an Epinio App CRD so `epinio app list`, `show`, `logs`, `exec`
@@ -54,7 +53,7 @@ metadata:
   labels:
     app.kubernetes.io/name: epinio-mcp
 rules:
-  # Read Epinio App CRDs (blobuid lookup for app_editing, adoption discovery)
+  # Read Epinio App CRDs (adoption discovery)
   - apiGroups: ["application.epinio.io"]
     resources: ["apps", "services", "appcharts"]
     verbs: ["get", "list", "watch"]
@@ -149,26 +148,6 @@ stringData:
   # token_endpoint: "https://auth.epinio.example.com/token"
 
 ---
-# Optional: pre-seed S3 gateway credentials so the `app_editing` capability
-# works before running `enable_capability(name="app_editing")`. Leave empty
-# to have the MCP populate these when `enable_capability` creates the
-# underlying service instance.
-apiVersion: v1
-kind: Secret
-metadata:
-  name: epinio-mcp-s3
-  namespace: epinio
-  labels:
-    app.kubernetes.io/name: epinio-mcp
-type: Opaque
-stringData:
-  endpoint: ""           # e.g. epinio-s3-gateway-seaweedfs-s3.epinio.svc.cluster.local:8333
-  bucket: "epinio"
-  access_key_id: ""
-  secret_access_key: ""
-  use_ssl: "false"
-
----
 # Optional: uncomment + edit if the image is in a private registry.
 # Reference from the Deployment's imagePullSecrets below.
 # apiVersion: v1
@@ -220,7 +199,7 @@ spec:
       containers:
         - name: epinio-mcp
           # EDIT ME: pin to a released version.
-          image: ghcr.io/krumware/epinio-mcp:latest
+          image: ghcr.io/epinio/mcp:latest
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -270,39 +249,6 @@ spec:
                 secretKeyRef:
                   name: epinio-mcp-auth
                   key: token_endpoint
-                  optional: true
-            # S3 gateway config — read by client/s3.go. Empty values mean
-            # "not configured"; the app_editing capability surfaces that
-            # via check_capabilities.
-            - name: S3_ENDPOINT
-              valueFrom:
-                secretKeyRef:
-                  name: epinio-mcp-s3
-                  key: endpoint
-                  optional: true
-            - name: S3_BUCKET
-              valueFrom:
-                secretKeyRef:
-                  name: epinio-mcp-s3
-                  key: bucket
-                  optional: true
-            - name: S3_ACCESS_KEY_ID
-              valueFrom:
-                secretKeyRef:
-                  name: epinio-mcp-s3
-                  key: access_key_id
-                  optional: true
-            - name: S3_SECRET_ACCESS_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: epinio-mcp-s3
-                  key: secret_access_key
-                  optional: true
-            - name: S3_USE_SSL
-              valueFrom:
-                secretKeyRef:
-                  name: epinio-mcp-s3
-                  key: use_ssl
                   optional: true
           readinessProbe:
             httpGet:
@@ -367,7 +313,7 @@ metadata:
     epinio.io/created-by: "kubectl"
 spec:
   origin:
-    container: "ghcr.io/krumware/epinio-mcp:latest"
+    container: "ghcr.io/epinio/mcp:latest"
   # Empty chartname signals adopted — no Helm release to render.
   chartname: ""
   # Any stable string; Epinio treats it as an opaque identifier.

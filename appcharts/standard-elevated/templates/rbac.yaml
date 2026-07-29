@@ -1,7 +1,6 @@
 {{- if .Values.appCrdAccess.enabled }}
 # Custom ServiceAccount with registry pull credentials and app CRD read access.
-# DEPRECATED: Remove when Epinio exposes blobuid in the REST API response,
-# making direct CRD reads unnecessary.
+# Used by the MCP's elevated adoption tools and the self_adoption capability.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -22,7 +21,6 @@ metadata:
     {{- include "epinio-application.labels" . | nindent 4 }}
   annotations:
     {{- include "epinio-application.annotations" . | nindent 4 }}
-    deprecated: "Remove when Epinio exposes blobuid in REST API"
 rules:
 - apiGroups: ["application.epinio.io"]
   resources: ["apps"]

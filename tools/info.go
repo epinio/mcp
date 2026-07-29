@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/krumware/epinio-mcp/client"
+	"github.com/epinio/mcp/client"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -31,6 +31,7 @@ func RegisterInfoTools(server *mcp.Server, c *client.Client) {
 			input InfoInput,
 		) (*mcp.CallToolResult, InfoOutput, error) {
 			info, err := c.Info()
+
 			if err != nil {
 				return nil, InfoOutput{}, fmt.Errorf("get info: %w", err)
 			}

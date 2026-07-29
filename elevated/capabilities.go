@@ -1,4 +1,4 @@
-package tools
+package elevated
 
 import (
 	"context"
@@ -6,11 +6,19 @@ import (
 	"os"
 	"strings"
 
-	"github.com/krumware/epinio-mcp/client"
+	"github.com/epinio/mcp/client"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
+
+// envOr returns the value of the environment variable key, or def when unset.
+func envOr(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
+}
 
 // Capability is an optional feature set the MCP can provide once the
 // underlying Epinio infrastructure is set up. Each capability declares its
@@ -33,24 +41,22 @@ type ProbeContext struct {
 // Requirement is a single dependency that can be checked and, where the MCP
 // has sufficient authority, fulfilled.
 type Requirement interface {
-	// Describe returns a stable short label (e.g. "catalog:s3-gateway").
+	// Describe returns a stable short label (e.g. "self:adopted").
 	Describe() string
 	// Check evaluates whether the requirement is satisfied.
-	Check(ctx context.Context, c *client.Client, pctx ProbeContext) RequirementStatus
+	Check(
+		ctx context.Context,
+		c *client.Client,
+		pctx ProbeContext,
+	) RequirementStatus
 	// Fulfill attempts to satisfy the requirement using the MCP's own auth.
 	// Implementations for requirements that can't be fulfilled (probes, RBAC,
 	// catalog CRDs without bundled manifests) return Action="not_fixable".
-	Fulfill(ctx context.Context, c *client.Client, pctx ProbeContext) FulfillStatus
-}
-
-// diagnosticRequirement is the optional interface an environmental probe
-// implements to opt out of being a hard gate for requireCapability. Probes
-// are useful for reporting readiness via check_capabilities but they can
-// flake (short handshake timeouts, pod-to-public-ingress hairpins, etc.)
-// and shouldn't block tool execution when the downstream caller (often a
-// browser on a different origin) can still succeed on its own.
-type diagnosticRequirement interface {
-	IsDiagnostic() bool
+	Fulfill(
+		ctx context.Context,
+		c *client.Client,
+		pctx ProbeContext,
+	) FulfillStatus
 }
 
 // RequirementStatus is the result of one check.
@@ -92,12 +98,20 @@ type CatalogEntryReq struct {
 
 func (r CatalogEntryReq) Describe() string { return "catalog:" + r.Name }
 
-func (r CatalogEntryReq) Check(ctx context.Context, c *client.Client, _ ProbeContext) RequirementStatus {
+func (r CatalogEntryReq) Check(
+	ctx context.Context,
+	c *client.Client,
+	_ ProbeContext,
+) RequirementStatus {
 	if _, err := c.ShowCatalogService(r.Name); err != nil {
 		return RequirementStatus{
 			Requirement: r.Describe(),
 			Ready:       false,
-			Message:     fmt.Sprintf("catalog entry %q not found: %v", r.Name, err),
+			Message: fmt.Sprintf(
+				"catalog entry %q not found: %v",
+				r.Name,
+				err,
+			),
 			FixableByUs: false,
 			Fix: fmt.Sprintf(
 				"kubectl apply -f manifests/%s-catalog-entry.yaml (cluster admin)",
@@ -112,7 +126,11 @@ func (r CatalogEntryReq) Check(ctx context.Context, c *client.Client, _ ProbeCon
 	}
 }
 
-func (r CatalogEntryReq) Fulfill(ctx context.Context, c *client.Client, _ ProbeContext) FulfillStatus {
+func (r CatalogEntryReq) Fulfill(
+	ctx context.Context,
+	c *client.Client,
+	_ ProbeContext,
+) FulfillStatus {
 	st := r.Check(ctx, c, ProbeContext{})
 	if st.Ready {
 		return FulfillStatus{
@@ -141,13 +159,22 @@ func (r ServiceInstanceReq) Describe() string {
 	return fmt.Sprintf("service:%s/%s", r.Namespace, r.Name)
 }
 
-func (r ServiceInstanceReq) Check(ctx context.Context, c *client.Client, _ ProbeContext) RequirementStatus {
+func (r ServiceInstanceReq) Check(
+	ctx context.Context,
+	c *client.Client,
+	_ ProbeContext,
+) RequirementStatus {
 	services, err := c.ListServices(r.Namespace)
+
 	if err != nil {
 		return RequirementStatus{
 			Requirement: r.Describe(),
 			Ready:       false,
-			Message:     fmt.Sprintf("could not list services in %q: %v", r.Namespace, err),
+			Message: fmt.Sprintf(
+				"could not list services in %q: %v",
+				r.Namespace,
+				err,
+			),
 		}
 	}
 	for _, s := range services {
@@ -155,20 +182,37 @@ func (r ServiceInstanceReq) Check(ctx context.Context, c *client.Client, _ Probe
 			return RequirementStatus{
 				Requirement: r.Describe(),
 				Ready:       true,
-				Message:     fmt.Sprintf("service %q present in %q", r.Name, r.Namespace),
+				Message: fmt.Sprintf(
+					"service %q present in %q",
+					r.Name,
+					r.Namespace,
+				),
 			}
 		}
 	}
 	return RequirementStatus{
 		Requirement: r.Describe(),
 		Ready:       false,
-		Message:     fmt.Sprintf("service %q not found in %q", r.Name, r.Namespace),
+		Message: fmt.Sprintf(
+			"service %q not found in %q",
+			r.Name,
+			r.Namespace,
+		),
 		FixableByUs: true,
-		Fix:         fmt.Sprintf(`create_service(namespace=%q, name=%q, catalog_service=%q)`, r.Namespace, r.Name, r.From),
+		Fix: fmt.Sprintf(
+			`create_service(namespace=%q, name=%q, catalog_service=%q)`,
+			r.Namespace,
+			r.Name,
+			r.From,
+		),
 	}
 }
 
-func (r ServiceInstanceReq) Fulfill(ctx context.Context, c *client.Client, _ ProbeContext) FulfillStatus {
+func (r ServiceInstanceReq) Fulfill(
+	ctx context.Context,
+	c *client.Client,
+	_ ProbeContext,
+) FulfillStatus {
 	if st := r.Check(ctx, c, ProbeContext{}); st.Ready {
 		return FulfillStatus{
 			Requirement: r.Describe(),
@@ -186,15 +230,25 @@ func (r ServiceInstanceReq) Fulfill(ctx context.Context, c *client.Client, _ Pro
 			Requirement: r.Describe(),
 			Action:      "failed",
 			Ready:       false,
-			Message:     fmt.Sprintf("could not create service %q from %q in %q", r.Name, r.From, r.Namespace),
-			Error:       err.Error(),
+			Message: fmt.Sprintf(
+				"could not create service %q from %q in %q",
+				r.Name,
+				r.From,
+				r.Namespace,
+			),
+			Error: err.Error(),
 		}
 	}
 	return FulfillStatus{
 		Requirement: r.Describe(),
 		Action:      "created",
 		Ready:       true,
-		Message:     fmt.Sprintf("created service %q from catalog %q in namespace %q", r.Name, r.From, r.Namespace),
+		Message: fmt.Sprintf(
+			"created service %q from catalog %q in namespace %q",
+			r.Name,
+			r.From,
+			r.Namespace,
+		),
 	}
 }
 
@@ -225,14 +279,24 @@ func (r ConfigurationBindingReq) Describe() string {
 	return fmt.Sprintf("binding:%s→%s/%s", r.Configuration, ns, app)
 }
 
-func (r ConfigurationBindingReq) Check(ctx context.Context, c *client.Client, _ ProbeContext) RequirementStatus {
+func (r ConfigurationBindingReq) Check(
+	ctx context.Context,
+	c *client.Client,
+	_ ProbeContext,
+) RequirementStatus {
 	ns, app := r.resolve()
 	a, err := c.ShowApp(ns, app)
+
 	if err != nil {
 		return RequirementStatus{
 			Requirement: r.Describe(),
 			Ready:       false,
-			Message:     fmt.Sprintf("could not read app %q in %q: %v", app, ns, err),
+			Message: fmt.Sprintf(
+				"could not read app %q in %q: %v",
+				app,
+				ns,
+				err,
+			),
 		}
 	}
 	for _, cfg := range a.Configuration.Configurations {
@@ -240,20 +304,39 @@ func (r ConfigurationBindingReq) Check(ctx context.Context, c *client.Client, _ 
 			return RequirementStatus{
 				Requirement: r.Describe(),
 				Ready:       true,
-				Message:     fmt.Sprintf("configuration %q is bound to %s/%s", r.Configuration, ns, app),
+				Message: fmt.Sprintf(
+					"configuration %q is bound to %s/%s",
+					r.Configuration,
+					ns,
+					app,
+				),
 			}
 		}
 	}
 	return RequirementStatus{
 		Requirement: r.Describe(),
 		Ready:       false,
-		Message:     fmt.Sprintf("configuration %q not bound to %s/%s", r.Configuration, ns, app),
+		Message: fmt.Sprintf(
+			"configuration %q not bound to %s/%s",
+			r.Configuration,
+			ns,
+			app,
+		),
 		FixableByUs: true,
-		Fix:         fmt.Sprintf(`bind_configuration(namespace=%q, app=%q, configurations=[%q])`, ns, app, r.Configuration),
+		Fix: fmt.Sprintf(
+			`bind_configuration(namespace=%q, app=%q, configurations=[%q])`,
+			ns,
+			app,
+			r.Configuration,
+		),
 	}
 }
 
-func (r ConfigurationBindingReq) Fulfill(ctx context.Context, c *client.Client, _ ProbeContext) FulfillStatus {
+func (r ConfigurationBindingReq) Fulfill(
+	ctx context.Context,
+	c *client.Client,
+	_ ProbeContext,
+) FulfillStatus {
 	ns, app := r.resolve()
 	if st := r.Check(ctx, c, ProbeContext{}); st.Ready {
 		return FulfillStatus{
@@ -263,20 +346,32 @@ func (r ConfigurationBindingReq) Fulfill(ctx context.Context, c *client.Client, 
 			Message:     st.Message,
 		}
 	}
-	if err := c.BindConfiguration(ns, app, []string{r.Configuration}); err != nil {
+	err := c.BindConfiguration(ns, app, []string{r.Configuration})
+
+	if err != nil {
 		return FulfillStatus{
 			Requirement: r.Describe(),
 			Action:      "failed",
 			Ready:       false,
-			Message:     fmt.Sprintf("could not bind %q to %s/%s", r.Configuration, ns, app),
-			Error:       err.Error(),
+			Message: fmt.Sprintf(
+				"could not bind %q to %s/%s",
+				r.Configuration,
+				ns,
+				app,
+			),
+			Error: err.Error(),
 		}
 	}
 	return FulfillStatus{
 		Requirement: r.Describe(),
 		Action:      "bound",
 		Ready:       true,
-		Message:     fmt.Sprintf("bound configuration %q to %s/%s — restart the app for it to take effect", r.Configuration, ns, app),
+		Message: fmt.Sprintf(
+			"bound configuration %q to %s/%s — restart the app for it to take effect",
+			r.Configuration,
+			ns,
+			app,
+		),
 	}
 }
 
@@ -293,8 +388,13 @@ func (r PodRBACReq) Describe() string {
 	return fmt.Sprintf("rbac:%s/%s:%s", r.Group, r.Resource, r.Verb)
 }
 
-func (r PodRBACReq) Check(ctx context.Context, _ *client.Client, _ ProbeContext) RequirementStatus {
-	k, err := client.GetKubeClient()
+func (r PodRBACReq) Check(
+	ctx context.Context,
+	_ *client.Client,
+	_ ProbeContext,
+) RequirementStatus {
+	k, err := GetKubeClient()
+
 	if err != nil {
 		return RequirementStatus{
 			Requirement: r.Describe(),
@@ -303,6 +403,7 @@ func (r PodRBACReq) Check(ctx context.Context, _ *client.Client, _ ProbeContext)
 		}
 	}
 	allowed, err := k.CanI(ctx, r.Verb, r.Group, r.Resource, r.Namespace)
+
 	if err != nil {
 		return RequirementStatus{
 			Requirement: r.Describe(),
@@ -314,7 +415,12 @@ func (r PodRBACReq) Check(ctx context.Context, _ *client.Client, _ ProbeContext)
 		return RequirementStatus{
 			Requirement: r.Describe(),
 			Ready:       false,
-			Message:     fmt.Sprintf("MCP pod ServiceAccount is not permitted to %s %s/%s", r.Verb, r.Group, r.Resource),
+			Message: fmt.Sprintf(
+				"MCP pod ServiceAccount is not permitted to %s %s/%s",
+				r.Verb,
+				r.Group,
+				r.Resource,
+			),
 			FixableByUs: false,
 			Fix: fmt.Sprintf(
 				"grant the MCP pod ServiceAccount %q on %s/%s via ClusterRole + ClusterRoleBinding (see manifests/epinio-mcp-rbac.yaml)",
@@ -325,11 +431,20 @@ func (r PodRBACReq) Check(ctx context.Context, _ *client.Client, _ ProbeContext)
 	return RequirementStatus{
 		Requirement: r.Describe(),
 		Ready:       true,
-		Message:     fmt.Sprintf("MCP pod can %s %s/%s", r.Verb, r.Group, r.Resource),
+		Message: fmt.Sprintf(
+			"MCP pod can %s %s/%s",
+			r.Verb,
+			r.Group,
+			r.Resource,
+		),
 	}
 }
 
-func (r PodRBACReq) Fulfill(ctx context.Context, c *client.Client, _ ProbeContext) FulfillStatus {
+func (r PodRBACReq) Fulfill(
+	ctx context.Context,
+	c *client.Client,
+	_ ProbeContext,
+) FulfillStatus {
 	st := r.Check(ctx, c, ProbeContext{})
 	if st.Ready {
 		return FulfillStatus{
@@ -347,235 +462,6 @@ func (r PodRBACReq) Fulfill(ctx context.Context, c *client.Client, _ ProbeContex
 	}
 }
 
-// S3AccessReq asserts the MCP can reach Epinio's S3 gateway. It's deliberately
-// mode-agnostic: success means either a configuration-binding (classic
-// Epinio-app install) or env-var-backed Secret (kubectl-installed adopted
-// MCP) has produced credentials the S3 client can use.
-//
-// Fulfill tries the Epinio configuration-binding path first; if the MCP
-// isn't a proper Epinio app (no REST write authority on its own Application
-// CRD) or the binding produces no effect, falls back to copying the
-// underlying catalog-service Secret into the MCP's own epinio-mcp-s3 Secret
-// and triggering a rolling restart.
-type S3AccessReq struct {
-	// Configuration is the Epinio configuration / K8s Secret name the
-	// s3-gateway service instance writes. Default "epinio-s3-gateway".
-	Configuration string
-	// ServiceNamespace is where the service instance lives. Defaults to
-	// the MCP's own namespace resolved via envOr(EPINIO_MCP_APP_NAMESPACE).
-	ServiceNamespace string
-	// SelfSecret is the Secret on the MCP's Deployment that holds S3 env
-	// vars in standalone mode. Default "epinio-mcp-s3".
-	SelfSecret string
-}
-
-func (r S3AccessReq) resolveSelf() (appNamespace, appName, selfSecret, configuration, serviceNamespace string) {
-	appNamespace = envOr("EPINIO_MCP_APP_NAMESPACE", "epinio")
-	appName = envOr("EPINIO_MCP_APP_NAME", "epinio-mcp")
-	selfSecret = r.SelfSecret
-	if selfSecret == "" {
-		selfSecret = "epinio-mcp-s3"
-	}
-	configuration = r.Configuration
-	if configuration == "" {
-		configuration = "epinio-s3-gateway"
-	}
-	serviceNamespace = r.ServiceNamespace
-	if serviceNamespace == "" {
-		serviceNamespace = appNamespace
-	}
-	return
-}
-
-func (r S3AccessReq) Describe() string { return "s3:access" }
-
-func (r S3AccessReq) Check(ctx context.Context, c *client.Client, _ ProbeContext) RequirementStatus {
-	_, appName, _, configuration, serviceNamespace := r.resolveSelf()
-
-	// 1. Can the S3 client already initialize? This covers both the
-	// env-var path (standalone mode with Secret mounted as env) and the
-	// mounted-configuration path (classic Epinio-app mode).
-	if s, err := client.GetS3Client(ctx); err == nil && s != nil {
-		return RequirementStatus{
-			Requirement: r.Describe(),
-			Ready:       true,
-			Message:     "S3 gateway is reachable using current credentials",
-		}
-	}
-
-	// 2. Neither path worked. Report which upstream piece is missing so
-	// enable_capability has enough context to fulfill.
-	_, err := c.ListServices(serviceNamespace)
-	if err != nil {
-		return RequirementStatus{
-			Requirement: r.Describe(),
-			Ready:       false,
-			Message:     fmt.Sprintf("S3 not configured and cannot list services in %q: %v", serviceNamespace, err),
-			FixableByUs: false,
-			Fix:         "ensure Epinio is reachable and the MCP's auth credentials are correct",
-		}
-	}
-	return RequirementStatus{
-		Requirement: r.Describe(),
-		Ready:       false,
-		Message: fmt.Sprintf(
-			"S3 gateway credentials are not available to %q — neither mounted at /configurations/%s/ nor present as S3_* env vars",
-			appName, configuration,
-		),
-		FixableByUs: true,
-		Fix: fmt.Sprintf(
-			"create the %q service instance and copy its credentials to the MCP's %q Secret "+
-				"(enable_capability does this automatically)",
-			configuration, "epinio-mcp-s3",
-		),
-	}
-}
-
-func (r S3AccessReq) Fulfill(ctx context.Context, c *client.Client, pctx ProbeContext) FulfillStatus {
-	appNamespace, appName, selfSecret, configuration, serviceNamespace := r.resolveSelf()
-
-	// Already satisfied?
-	if st := r.Check(ctx, c, pctx); st.Ready {
-		return FulfillStatus{
-			Requirement: r.Describe(),
-			Action:      "no_op",
-			Ready:       true,
-			Message:     st.Message,
-		}
-	}
-
-	// Ensure the Epinio service instance exists. Create it via caller's
-	// token if possible — that's the tier-1 auth path. If this fails with
-	// "already exists" it's fine.
-	if err := c.CreateService(serviceNamespace, client.ServiceCreateRequest{
-		CatalogService: "s3-gateway",
-		Name:           configuration,
-		Wait:           true,
-	}); err != nil {
-		if !strings.Contains(strings.ToLower(err.Error()), "already exists") {
-			return FulfillStatus{
-				Requirement: r.Describe(),
-				Action:      "failed",
-				Ready:       false,
-				Message:     fmt.Sprintf("could not create service %q in %q", configuration, serviceNamespace),
-				Error:       err.Error(),
-			}
-		}
-	}
-
-	// Try the classic Epinio-binding path first — fast and matches the
-	// traditional deployment model.
-	if err := c.BindConfiguration(appNamespace, appName, []string{configuration}); err == nil {
-		// Post-bind S3 readiness may require a pod restart to remount the
-		// configuration. Report success; the outer enable_capability will
-		// re-check and surface still_missing if the restart didn't happen.
-		return FulfillStatus{
-			Requirement: r.Describe(),
-			Action:      "bound",
-			Ready:       true,
-			Message: fmt.Sprintf(
-				"bound configuration %q to %s/%s — restart the app to mount the credentials",
-				configuration, appNamespace, appName,
-			),
-		}
-	}
-
-	// Binding failed — likely the MCP is adopted (no real Epinio App to
-	// bind to). Copy credentials from the service's underlying Secret into
-	// the MCP's self-managed Secret and trigger a rolling restart. Needs
-	// the MCP pod's ServiceAccount to have `get secrets` in the service
-	// namespace and `patch secrets` + `patch deployments` in its own
-	// namespace (see install/epinio-mcp.yaml's Role).
-	k, err := client.GetKubeClient()
-	if err != nil {
-		return FulfillStatus{
-			Requirement: r.Describe(),
-			Action:      "failed",
-			Ready:       false,
-			Message:     "Epinio binding failed and K8s client unavailable — cannot fall back to standalone-mode Secret population",
-			Error:       err.Error(),
-		}
-	}
-	src, err := k.GetSecret(ctx, serviceNamespace, configuration)
-	if err != nil {
-		return FulfillStatus{
-			Requirement: r.Describe(),
-			Action:      "failed",
-			Ready:       false,
-			Message: fmt.Sprintf(
-				"could not read service credentials Secret %q/%q — service instance may still be provisioning",
-				serviceNamespace, configuration,
-			),
-			Error: err.Error(),
-		}
-	}
-
-	// Translate Epinio's configuration keys (endpoint, bucket, useSSL,
-	// credentials in AWS CLI ini format) into env-var-style keys the MCP's
-	// Deployment sources via valueFrom.secretKeyRef.
-	selfData := translateS3Secret(src.Data)
-	if err := k.WriteSecret(ctx, appNamespace, selfSecret, selfData, client.CanonicalLabels(appName, appNamespace), nil); err != nil {
-		return FulfillStatus{
-			Requirement: r.Describe(),
-			Action:      "failed",
-			Ready:       false,
-			Message:     fmt.Sprintf("failed to write credentials to %q/%q", appNamespace, selfSecret),
-			Error:       err.Error(),
-		}
-	}
-
-	// Roll the pod so the new env vars take effect. Non-fatal if it fails
-	// (the credentials are already persisted; the caller can restart
-	// manually).
-	if err := k.RestartDeployment(ctx, appNamespace, appName); err != nil {
-		return FulfillStatus{
-			Requirement: r.Describe(),
-			Action:      "created",
-			Ready:       false,
-			Message: fmt.Sprintf(
-				"credentials written to %q/%q but rollout restart failed — kubectl -n %s rollout restart deployment/%s",
-				appNamespace, selfSecret, appNamespace, appName,
-			),
-			Error: err.Error(),
-		}
-	}
-	return FulfillStatus{
-		Requirement: r.Describe(),
-		Action:      "created",
-		Ready:       true,
-		Message: fmt.Sprintf(
-			"wrote S3 credentials into %q/%q and triggered rolling restart — app_editing ready after pod rollout",
-			appNamespace, selfSecret,
-		),
-	}
-}
-
-// translateS3Secret maps the keys on a catalog-service credentials Secret
-// (endpoint, bucket, useSSL, credentials/AWS-CLI-style) into the env-var
-// keys the MCP's Deployment expects in its self-managed Secret.
-func translateS3Secret(in map[string][]byte) map[string][]byte {
-	out := map[string][]byte{}
-	if v, ok := in["endpoint"]; ok {
-		out["endpoint"] = v
-	}
-	if v, ok := in["bucket"]; ok {
-		out["bucket"] = v
-	}
-	if v, ok := in["useSSL"]; ok {
-		out["use_ssl"] = v
-	}
-	if raw, ok := in["credentials"]; ok {
-		ak, sk := client.ParseAWSCredentials(string(raw))
-		if ak != "" {
-			out["access_key_id"] = []byte(ak)
-		}
-		if sk != "" {
-			out["secret_access_key"] = []byte(sk)
-		}
-	}
-	return out
-}
-
 // SelfAdoptionReq asserts the MCP's own App CRD has the metadata an adopted
 // app should carry — the canonical labels, the `epinio.io/adopted: "true"`
 // annotation, and a populated spec.imageurl matching the running pod. It's
@@ -590,9 +476,14 @@ func (r SelfAdoptionReq) selfRef() (namespace, name string) {
 	return
 }
 
-func (r SelfAdoptionReq) Check(ctx context.Context, _ *client.Client, _ ProbeContext) RequirementStatus {
+func (r SelfAdoptionReq) Check(
+	ctx context.Context,
+	_ *client.Client,
+	_ ProbeContext,
+) RequirementStatus {
 	namespace, name := r.selfRef()
-	k, err := client.GetKubeClient()
+	k, err := GetKubeClient()
+
 	if err != nil {
 		return RequirementStatus{
 			Requirement: r.Describe(),
@@ -603,12 +494,17 @@ func (r SelfAdoptionReq) Check(ctx context.Context, _ *client.Client, _ ProbeCon
 		}
 	}
 	app, err := k.ReadEpinioApp(ctx, namespace, name)
+
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			return RequirementStatus{
 				Requirement: r.Describe(),
 				Ready:       false,
-				Message:     fmt.Sprintf("MCP's own App CRD %q/%q is missing — the install manifest should have created it", namespace, name),
+				Message: fmt.Sprintf(
+					"MCP's own App CRD %q/%q is missing — the install manifest should have created it",
+					namespace,
+					name,
+				),
 				FixableByUs: true,
 				Fix:         "enable_capability(name=\"self_adoption\") — creates the App CRD from the running Deployment",
 			}
@@ -620,11 +516,15 @@ func (r SelfAdoptionReq) Check(ctx context.Context, _ *client.Client, _ ProbeCon
 		}
 	}
 	annotations := app.GetAnnotations()
-	if annotations[client.EpinioAdoptedAnnotation] != "true" {
+	if annotations[EpinioAdoptedAnnotation] != "true" {
 		return RequirementStatus{
 			Requirement: r.Describe(),
 			Ready:       false,
-			Message:     fmt.Sprintf("App CRD %q/%q is not annotated as adopted", namespace, name),
+			Message: fmt.Sprintf(
+				"App CRD %q/%q is not annotated as adopted",
+				namespace,
+				name,
+			),
 			FixableByUs: true,
 			Fix:         "enable_capability(name=\"self_adoption\")",
 		}
@@ -634,7 +534,11 @@ func (r SelfAdoptionReq) Check(ctx context.Context, _ *client.Client, _ ProbeCon
 		return RequirementStatus{
 			Requirement: r.Describe(),
 			Ready:       false,
-			Message:     fmt.Sprintf("App CRD %q/%q has empty spec.imageurl — reconcile_app would populate it from the running Deployment", namespace, name),
+			Message: fmt.Sprintf(
+				"App CRD %q/%q has empty spec.imageurl — reconcile_app would populate it from the running Deployment",
+				namespace,
+				name,
+			),
 			FixableByUs: true,
 			Fix:         "enable_capability(name=\"self_adoption\")",
 		}
@@ -642,11 +546,19 @@ func (r SelfAdoptionReq) Check(ctx context.Context, _ *client.Client, _ ProbeCon
 	return RequirementStatus{
 		Requirement: r.Describe(),
 		Ready:       true,
-		Message:     fmt.Sprintf("MCP self-adoption metadata is complete on %q/%q", namespace, name),
+		Message: fmt.Sprintf(
+			"MCP self-adoption metadata is complete on %q/%q",
+			namespace,
+			name,
+		),
 	}
 }
 
-func (r SelfAdoptionReq) Fulfill(ctx context.Context, c *client.Client, pctx ProbeContext) FulfillStatus {
+func (r SelfAdoptionReq) Fulfill(
+	ctx context.Context,
+	c *client.Client,
+	pctx ProbeContext,
+) FulfillStatus {
 	namespace, name := r.selfRef()
 	if st := r.Check(ctx, c, pctx); st.Ready {
 		return FulfillStatus{
@@ -684,13 +596,18 @@ type selfAdoptResult struct {
 	err     error
 }
 
-func adoptOrReconcileSelf(ctx context.Context, namespace, name string) selfAdoptResult {
-	k, err := client.GetKubeClient()
+func adoptOrReconcileSelf(
+	ctx context.Context,
+	namespace, name string,
+) selfAdoptResult {
+	k, err := GetKubeClient()
+
 	if err != nil {
 		return selfAdoptResult{message: "K8s client unavailable", err: err}
 	}
 
 	dep, err := k.GetDeployment(ctx, namespace, name)
+
 	if err != nil {
 		return selfAdoptResult{
 			message: fmt.Sprintf("read deployment %q/%q", namespace, name),
@@ -699,13 +616,25 @@ func adoptOrReconcileSelf(ctx context.Context, namespace, name string) selfAdopt
 	}
 	image := primaryContainerImage(dep.Spec.Template.Spec.Containers)
 
-	labels := client.CanonicalLabels(name, namespace)
-	annotations := map[string]string{client.EpinioAdoptedAnnotation: "true"}
-	serviceName := discoverServiceForDeployment(ctx, k, namespace, dep.Spec.Selector.MatchLabels)
+	labels := CanonicalLabels(name, namespace)
+	annotations := map[string]string{EpinioAdoptedAnnotation: "true"}
+	serviceName := discoverServiceForDeployment(
+		ctx,
+		k,
+		namespace,
+		dep.Spec.Selector.MatchLabels,
+	)
 	routes := deriveRoutes(ctx, k, namespace, serviceName)
 
 	// Ensure the App CRD is present and correct.
-	app := buildAdoptedAppCR(namespace, name, image, routes, labels, annotations)
+	app := buildAdoptedAppCR(
+		namespace,
+		name,
+		image,
+		routes,
+		labels,
+		annotations,
+	)
 	if err := k.WriteEpinioApp(ctx, app); err != nil {
 		return selfAdoptResult{message: "write app CRD", err: err}
 	}
@@ -713,14 +642,18 @@ func adoptOrReconcileSelf(ctx context.Context, namespace, name string) selfAdopt
 	// Make sure the Deployment and Service are labeled too — users may
 	// have stripped labels by mistake, or an older install didn't set
 	// the adoption annotation.
-	if err := k.LabelDeployment(ctx, namespace, name, labels, annotations); err != nil {
+	err = k.LabelDeployment(ctx, namespace, name, labels, annotations)
+
+	if err != nil {
 		return selfAdoptResult{message: "label deployment", err: err}
 	}
 	podLabels := mergeMaps(labels, map[string]string{
 		"epinio.io/app-container": name,
 		"epinio.io/stage-id":      "adopted",
 	})
-	if err := k.LabelDeploymentPodTemplate(ctx, namespace, name, podLabels, nil); err != nil {
+	err = k.LabelDeploymentPodTemplate(ctx, namespace, name, podLabels, nil)
+
+	if err != nil {
 		return selfAdoptResult{message: "label pod template", err: err}
 	}
 	if serviceName != "" {
@@ -747,12 +680,11 @@ type LogStreamProbeReq struct {
 
 func (r LogStreamProbeReq) Describe() string { return "probe:log_streaming" }
 
-// IsDiagnostic marks this requirement as informational-only for the gate
-// path. check_capabilities still reports its mode/ready for observability,
-// but requireCapability won't block tool execution on a flaky probe.
-func (r LogStreamProbeReq) IsDiagnostic() bool { return true }
-
-func (r LogStreamProbeReq) Check(ctx context.Context, c *client.Client, pctx ProbeContext) RequirementStatus {
+func (r LogStreamProbeReq) Check(
+	ctx context.Context,
+	c *client.Client,
+	pctx ProbeContext,
+) RequirementStatus {
 	ns, app := r.DefaultNamespace, r.DefaultApp
 	if pctx.ProbeApp != "" {
 		if parts := strings.SplitN(pctx.ProbeApp, "/", 2); len(parts) == 2 {
@@ -779,7 +711,11 @@ func (r LogStreamProbeReq) Check(ctx context.Context, c *client.Client, pctx Pro
 	}
 }
 
-func (r LogStreamProbeReq) Fulfill(ctx context.Context, c *client.Client, pctx ProbeContext) FulfillStatus {
+func (r LogStreamProbeReq) Fulfill(
+	ctx context.Context,
+	c *client.Client,
+	pctx ProbeContext,
+) FulfillStatus {
 	st := r.Check(ctx, c, pctx)
 	return FulfillStatus{
 		Requirement: r.Describe(),
@@ -789,40 +725,9 @@ func (r LogStreamProbeReq) Fulfill(ctx context.Context, c *client.Client, pctx P
 	}
 }
 
-// --- Helpers ---
-
-func envOr(key, def string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return def
-}
-
 // --- Registry ---
 
 var registry = map[string]Capability{
-	"app_editing": {
-		Name: "app_editing",
-		Description: "Retrieve and modify the source of already-deployed apps " +
-			"(get_app_source, edit_app). Requires S3 gateway access to Epinio's " +
-			"internal staging storage and K8s RBAC to read the app CRD.",
-		Requires: []Requirement{
-			CatalogEntryReq{Name: "s3-gateway"},
-			// S3AccessReq subsumes the classic Epinio-app ConfigurationBindingReq
-			// and also handles the adopted / kubectl-installed MCP case by
-			// copying credentials directly into the MCP's self-managed Secret
-			// and triggering a rolling restart. Either path produces an
-			// initializable S3 client — that's the real runtime need.
-			S3AccessReq{
-				Configuration: "epinio-s3-gateway",
-			},
-			PodRBACReq{
-				Verb:     "get",
-				Group:    "application.epinio.io",
-				Resource: "apps",
-			},
-		},
-	},
 	"log_streaming": {
 		Name: "log_streaming",
 		Description: "Live log tailing via WebSocket. Falls back to HTTP polling " +
@@ -892,7 +797,12 @@ type EnableCapabilityOutput struct {
 // CheckCapability runs Check on every requirement of a capability and
 // aggregates the result. Exposed so requireCapability (gate in other tool
 // handlers) can reuse the same logic.
-func CheckCapability(ctx context.Context, c *client.Client, cap Capability, pctx ProbeContext) CapabilityStatus {
+func CheckCapability(
+	ctx context.Context,
+	c *client.Client,
+	cap Capability,
+	pctx ProbeContext,
+) CapabilityStatus {
 	status := CapabilityStatus{
 		Name:        cap.Name,
 		Description: cap.Description,
@@ -909,57 +819,6 @@ func CheckCapability(ctx context.Context, c *client.Client, cap Capability, pctx
 		}
 	}
 	return status
-}
-
-// MissingCapabilityError is returned by requireCapability when a gated tool
-// is called before its capability's prerequisites are satisfied. The handler
-// turns this into a structured MCP tool error with a fix hint in the body.
-type MissingCapabilityError struct {
-	Capability string
-	Missing    []RequirementStatus
-}
-
-func (e *MissingCapabilityError) Error() string {
-	var labels []string
-	for _, r := range e.Missing {
-		labels = append(labels, r.Requirement)
-	}
-	return fmt.Sprintf("capability %q not ready: missing %s — call enable_capability(%q) or check_capabilities(%q)",
-		e.Capability, strings.Join(labels, ", "), e.Capability, e.Capability)
-}
-
-// requireCapability returns nil if the named capability is ready, or a
-// MissingCapabilityError containing the failing requirements if not.
-// Intended for use at the top of gated tool handlers.
-func requireCapability(ctx context.Context, c *client.Client, name string, pctx ProbeContext) error {
-	cap, ok := registry[name]
-	if !ok {
-		return fmt.Errorf("unknown capability %q", name)
-	}
-	// Only gate on real (non-diagnostic) requirements. Probes exist to report
-	// reachability through check_capabilities; they can flake without meaning
-	// the caller's own attempt will fail, so they're not a hard gate.
-	var missing []RequirementStatus
-	for _, req := range cap.Requires {
-		if isDiagnosticRequirement(req) {
-			continue
-		}
-		rs := req.Check(ctx, c, pctx)
-		if !rs.Ready {
-			missing = append(missing, rs)
-		}
-	}
-	if len(missing) == 0 {
-		return nil
-	}
-	return &MissingCapabilityError{Capability: name, Missing: missing}
-}
-
-// isDiagnosticRequirement returns true when a requirement opted out of being
-// a hard gate by implementing diagnosticRequirement.IsDiagnostic() → true.
-func isDiagnosticRequirement(r Requirement) bool {
-	d, ok := r.(diagnosticRequirement)
-	return ok && d.IsDiagnostic()
 }
 
 // RegisterCapabilityTools adds check_capabilities and enable_capability.
@@ -986,12 +845,17 @@ func RegisterCapabilityTools(server *mcp.Server, c *client.Client) {
 				if !ok {
 					return nil, out, fmt.Errorf("unknown capability %q", input.Name)
 				}
-				out.Capabilities = []CapabilityStatus{CheckCapability(ctx, c, cap, pctx)}
+				out.Capabilities = []CapabilityStatus{
+					CheckCapability(ctx, c, cap, pctx),
+				}
 				return nil, out, nil
 			}
 			out.Capabilities = make([]CapabilityStatus, 0, len(registry))
 			for _, cap := range registry {
-				out.Capabilities = append(out.Capabilities, CheckCapability(ctx, c, cap, pctx))
+				out.Capabilities = append(
+					out.Capabilities,
+					CheckCapability(ctx, c, cap, pctx),
+				)
 			}
 			return nil, out, nil
 		},

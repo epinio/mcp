@@ -1,8 +1,7 @@
 # RBAC grant for the Epinio-managed application pod ServiceAccount.
 #
-# Needed by the `app_editing` capability so the MCP can read the
-# `spec.blobuid` field from Epinio Application CRDs and resolve a
-# deployed app's staging tarball in the S3 gateway.
+# Needed by the MCP's elevated adoption tools and the self_adoption capability,
+# which read Epinio Application CRDs directly (adoption discovery + self-checks).
 #
 # With the `standard` appchart, Epinio runs all app pods in the `epinio`
 # namespace as the shared ServiceAccount `epinio`. Binding the ClusterRole

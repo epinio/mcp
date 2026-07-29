@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/krumware/epinio-mcp/client"
+	"github.com/epinio/mcp/client"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -34,7 +34,13 @@ func RegisterLogTools(server *mcp.Server, c *client.Client) {
 			req *mcp.CallToolRequest,
 			input AppLogsInput,
 		) (*mcp.CallToolResult, AppLogsOutput, error) {
-			lines, err := c.AppLogs(input.Namespace, input.Name, input.StageID, false)
+			lines, err := c.AppLogs(
+				input.Namespace,
+				input.Name,
+				input.StageID,
+				false,
+			)
+
 			if err != nil {
 				return nil, AppLogsOutput{}, fmt.Errorf("fetch logs: %w", err)
 			}
