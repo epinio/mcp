@@ -72,6 +72,10 @@ epinio-mcp/
 ├── epinio.yml               # Core push deploy config (standard appchart)
 ├── epinio-elevated.yml      # Elevated push deploy config (standard-elevated + flags)
 ├── .epinioignore            # Excludes build artifacts + .git/ from push
+├── skills/                  # Portable agent skill (MCP stand-in via the epinio CLI)
+│   └── epinio-cli/          # Copy to ~/.cursor/skills/epinio-cli/ (see README)
+│       ├── SKILL.md         # MCP tool → epinio CLI map
+│       └── guidance.md      # Deploy / staging guidance (get_build_guidance stand-in)
 ├── LICENSE                  # Apache-2.0
 ├── AGENTS.md                # This file
 └── README.md                # Project overview; links to docs.epinio.io

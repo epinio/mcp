@@ -25,6 +25,17 @@ Full documentation lives at **[docs.epinio.io](https://docs.epinio.io)**:
 - **[Install the MCP server](https://docs.epinio.io/getting-started/install-mcp)** — prerequisites, configuration, and deployment.
 - **[MCP server reference](https://docs.epinio.io/reference/mcp)** — the full tool list, optional capabilities, and health probes.
 
+## CLI skill (no MCP)
+
+Some environments cannot use MCP but still have an LLM and the Epinio CLI.
+`skills/epinio-cli/` is a Cursor/Claude agent skill that maps every core MCP
+tool to `epinio` commands.
+
+Copy the folder to `~/.cursor/skills/epinio-cli/` (personal, all projects) or
+`<project>/.cursor/skills/epinio-cli/` (this project only). Requires the
+Epinio CLI **1.14.1+** and a logged-in session (`epinio login`). Elevated MCP
+tools (workload adoption) have no CLI equivalent.
+
 ## Install
 
 Clone the repo, set your cluster details in `epinio.yml`, then:
