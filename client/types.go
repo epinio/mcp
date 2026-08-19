@@ -154,6 +154,11 @@ type DeployResponse struct {
 	Routes []string `json:"routes"`
 }
 
+// APIResponse is the generic Epinio status envelope.
+type APIResponse struct {
+	Status string `json:"status"`
+}
+
 // EnvVariable represents an environment variable.
 type EnvVariable struct {
 	Name   string `json:"name"`

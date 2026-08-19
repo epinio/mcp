@@ -1,6 +1,7 @@
 package client
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -159,5 +160,106 @@ func TestIsProxyTimeout(t *testing.T) {
 				t.Errorf("isProxyTimeout(%v) = %v, want %v", tt.err, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestAppSourcePatch(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPatch ||
+			r.URL.Path != "/api/v1/namespaces/ws/applications/myapp/source" {
+			http.NotFound(w, r)
+			return
+		}
+		if err := r.ParseMultipartForm(1 << 20); err != nil {
+			t.Errorf("ParseMultipartForm: %v", err)
+		}
+		if got := r.FormValue("process_cmd"); got != "/app/bin/start" {
+			t.Errorf("process_cmd = %q, want /app/bin/start", got)
+		}
+		file, header, err := r.FormFile("file")
+		if err != nil {
+			t.Fatalf("FormFile: %v", err)
+		}
+		defer file.Close()
+		if header.Filename != "source.tar.gz" {
+			t.Errorf("filename = %q, want source.tar.gz", header.Filename)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"stage": map[string]string{"id": "stage-123"},
+			"image": "registry.example.com/app:abc",
+		})
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, "admin", "pw")
+	resp, err := c.AppSourcePatch(
+		"ws",
+		"myapp",
+		strings.NewReader("fake-tar-gz"),
+		"/app/bin/start",
+	)
+	if err != nil {
+		t.Fatalf("AppSourcePatch() error = %v", err)
+	}
+	if resp.Stage.ID != "stage-123" || resp.ImageURL != "registry.example.com/app:abc" {
+		t.Errorf("AppSourcePatch() = %+v, want stage-123 image", resp)
+	}
+}
+
+func TestAppSync(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost ||
+			r.URL.Path != "/api/v1/namespaces/ws/applications/myapp/sync" {
+			http.NotFound(w, r)
+			return
+		}
+		if err := r.ParseMultipartForm(1 << 20); err != nil {
+			t.Errorf("ParseMultipartForm: %v", err)
+		}
+		for key, want := range map[string]string{
+			"mode":        "binary",
+			"dest":        "/epinio-sync/app",
+			"binary_name": "my-app",
+		} {
+			if got := r.FormValue(key); got != want {
+				t.Errorf("%s = %q, want %q", key, got, want)
+			}
+		}
+		file, header, err := r.FormFile("file")
+		if err != nil {
+			t.Fatalf("FormFile: %v", err)
+		}
+		defer file.Close()
+		if header.Filename != "sync.tar" {
+			t.Errorf("filename = %q, want sync.tar", header.Filename)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, "admin", "pw")
+	err := c.AppSync(
+		"ws",
+		"myapp",
+		strings.NewReader("fake-tar"),
+		"binary",
+		"/epinio-sync/app",
+		"my-app",
+	)
+	if err != nil {
+		t.Fatalf("AppSync() error = %v", err)
+	}
+}
+
+func TestAppSyncInvalidMode(t *testing.T) {
+	c := New("https://example.com", "admin", "pw")
+	err := c.AppSync("ws", "myapp", strings.NewReader("x"), "invalid", "", "")
+	if err == nil {
+		t.Fatal("AppSync() error = nil, want invalid mode error")
+	}
+	if !strings.Contains(err.Error(), "invalid sync mode") {
+		t.Errorf("error = %q, want invalid sync mode", err.Error())
 	}
 }

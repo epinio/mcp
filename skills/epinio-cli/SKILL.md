@@ -61,6 +61,8 @@ Placeholders: `NS` namespace, `APP` app, `NAME` resource name.
 |---|---|
 | `push_app` | `epinio push --name APP --path DIR [--builder-image IMAGE] [--app-chart CHART]` |
 | `upload_and_stage` + `deploy_staged` | No two-step CLI. Use `epinio push` (upload + stage + deploy). Rebuild existing: `epinio app restage APP` (`--no-restart` to skip restart). |
+| `watch_app_startup` | `epinio app watch APP --path DIR` (startup phase only — MCP has no local directory watcher; call again after each edit via `sync_app`) |
+| `sync_app` | No incremental CLI call. After startup, each save is handled inside the running `epinio app watch` session. With MCP only: call `sync_app` with changed files after `watch_app_startup`. |
 | Git origin (public) | `epinio push --name APP --git URL,REVISION [--git-provider PROVIDER]` |
 | Git origin (private) | Create a gitconfig first, then push with an explicit `origin.git.gitconfig` (see Gitconfigs). |
 | Prebuilt image | `epinio push --name APP --container-image-url IMAGE` |
