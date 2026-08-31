@@ -358,3 +358,47 @@ type CatalogServiceUpdateRequest struct {
 	Settings         map[string]ChartSetting `json:"settings,omitempty"`
 	SecretTypes      []string                `json:"secret_types,omitempty"`
 }
+
+// --- Gitconfig CRUD ---
+// Gitconfigs are the credentials Epinio uses to pull from a private git repo
+// (used by `epinio push --git-url` / importgit flows). Only
+// list/show/create/delete/match are implemented — there is no update. Epinio
+// registers no PATCH /gitconfigs/:id route, and EPINIO-343 ("Support updates
+// to existing gitconfigs") turned out to mean explicit gitconfig selection
+// at deploy time, the `global` create flag, and GitHub/GitLab Enterprise
+// provider fixes, not an edit-in-place API — see tools/gitconfigs.go.
+
+// Gitconfig contains the public parts of an Epinio git configuration. The
+// password and certificate data supplied on create/update are private and
+// never returned by the API — Epinio excludes them from Gitconfig reads.
+type Gitconfig struct {
+	Meta       MetaLite `json:"meta,omitempty"`
+	Global     bool     `json:"global,omitempty"`
+	URL        string   `json:"url,omitempty"`
+	Provider   string   `json:"provider,omitempty"`
+	Username   string   `json:"username,omitempty"`
+	UserOrg    string   `json:"userorg,omitempty"`
+	Repository string   `json:"repository,omitempty"`
+	SkipSSL    bool     `json:"skipssl,omitempty"`
+}
+
+// GitconfigsMatchResponse contains the ids of gitconfigs matching a prefix.
+type GitconfigsMatchResponse struct {
+	Names []string `json:"names,omitempty"`
+}
+
+// GitconfigCreateRequest is the body for POST /gitconfigs. Valid Provider
+// values: "git" (generic), "github", "github_enterprise_cloud",
+// "github_enterprise_self_hosted", "gitlab", "gitlab_enterprise".
+type GitconfigCreateRequest struct {
+	ID           string `json:"id,omitempty"`
+	Global       bool   `json:"global,omitempty"`
+	URL          string `json:"url,omitempty"`
+	Provider     string `json:"provider,omitempty"`
+	UserOrg      string `json:"userorg,omitempty"`
+	Repository   string `json:"repository,omitempty"`
+	SkipSSL      bool   `json:"skipssl,omitempty"`
+	Username     string `json:"username,omitempty"`
+	Password     string `json:"password,omitempty"` // nolint:gosec // intentional auth field for git config
+	Certificates []byte `json:"certs,omitempty"`
+}

@@ -25,5 +25,6 @@ func RegisterCore(server *mcp.Server, c *client.Client) {
 	RegisterAppChartTools(server, c)
 	RegisterBuilderImageTools(server, c)
 	RegisterCatalogTools(server, c)
+	RegisterGitconfigTools(server, c)
 	RegisterGuidanceTools(server, c)
 }

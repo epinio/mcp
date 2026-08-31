@@ -51,6 +51,7 @@ epinio-mcp/
 │   ├── clone.go             # get_app_manifest + clone_app
 │   ├── appcharts.go         # list_appcharts / show_appchart
 │   ├── builders.go          # list_builders
+│   ├── gitconfigs.go        # list/show/match/create/delete_gitconfig (no update — see EPINIO-343 note in tools/gitconfigs.go)
 │   └── guidance.go          # MCP Prompts + get_build_guidance
 ├── elevated/                # Opt-in tiers (EPINIO_MCP_ELEVATED*) — direct Kubernetes
 │   ├── register.go          # RegisterReadOnly + RegisterAdoption (+ guard injection)
