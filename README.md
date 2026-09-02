@@ -8,11 +8,7 @@ the [Epinio](https://epinio.io) API as tools for AI agents such as Claude. It
 runs on your cluster and translates MCP tool calls into Epinio REST API requests,
 so an agent can deploy and manage applications through conversation.
 
-By default the server wires **only** to the Epinio API, running as the calling
-user — app lifecycle, logs, source retrieval, inner-loop app watch sync, and
-CRUD for app charts, builder images, and catalog services. A single elevated capability set that reaches
-directly into Kubernetes — workload **adoption** — is **off by default** and
-opt-in via the `EPINIO_MCP_ELEVATED` flag. See the reference docs.
+By default the server wires only to the Epinio API, running as the calling user — app lifecycle, logs, source retrieval, inner-loop app watch sync, and CRUD for app charts, builder images, and catalog services. A single elevated capability set that reaches directly into Kubernetes — workload adoption — is off by default and opt-in via the EPINIO_MCP_ELEVATED flag. See the reference docs.
 
 **Requires Epinio 1.14.1 or later.** The server depends on the builder-image,
 catalog-service, and app-chart CRUD API and the source-retrieval endpoint, all
@@ -24,17 +20,6 @@ Full documentation lives at **[docs.epinio.io](https://docs.epinio.io)**:
 
 - **[Install the MCP server](https://docs.epinio.io/getting-started/install-mcp)** — prerequisites, configuration, and deployment.
 - **[MCP server reference](https://docs.epinio.io/reference/mcp)** — the full tool list, optional capabilities, and health probes.
-
-## CLI skill (no MCP)
-
-Some environments cannot use MCP but still have an LLM and the Epinio CLI.
-`skills/epinio-cli/` is a Cursor/Claude agent skill that maps every core MCP
-tool to `epinio` commands.
-
-Copy the folder to `~/.cursor/skills/epinio-cli/` (personal, all projects) or
-`<project>/.cursor/skills/epinio-cli/` (this project only). Requires the
-Epinio CLI **1.14.1+** and a logged-in session (`epinio login`). Elevated MCP
-tools (workload adoption) have no CLI equivalent.
 
 ## Install
 

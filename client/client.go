@@ -777,6 +777,61 @@ func (c *Client) DeleteCatalogService(name string) error {
 	return c.do("DELETE", "/catalogservices/"+url.PathEscape(name), nil, nil)
 }
 
+// --- Gitconfig CRUD ---
+
+// ListGitconfigs lists the git configurations registered on the cluster.
+func (c *Client) ListGitconfigs() ([]Gitconfig, error) {
+	var resp []Gitconfig
+	if err := c.do("GET", "/gitconfigs", nil, &resp); err != nil {
+		return nil, err
+	}
+	return resp, nil
+}
+
+// ShowGitconfig fetches a single git configuration by id. Password and
+// certificate data are never present in the response — Epinio excludes them
+// from reads.
+func (c *Client) ShowGitconfig(id string) (*Gitconfig, error) {
+	var resp Gitconfig
+	err := c.do("GET", "/gitconfigs/"+url.PathEscape(id), nil, &resp)
+
+	if err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// GitconfigsMatch returns the ids of gitconfigs whose name starts with
+// prefix. An empty prefix matches every gitconfig — the Epinio CLI uses this
+// to resolve `gitconfig delete --all` without transferring full records.
+func (c *Client) GitconfigsMatch(prefix string) ([]string, error) {
+	var resp GitconfigsMatchResponse
+	path := "/gitconfigsmatch"
+	if prefix != "" {
+		path += "/" + url.PathEscape(prefix)
+	}
+	if err := c.do("GET", path, nil, &resp); err != nil {
+		return nil, err
+	}
+	return resp.Names, nil
+}
+
+// CreateGitconfig registers a new git configuration.
+func (c *Client) CreateGitconfig(req GitconfigCreateRequest) error {
+	return c.do("POST", "/gitconfigs", req, nil)
+}
+
+// DeleteGitconfig deletes one or more git configurations in a single batch
+// call, mirroring Epinio's own client (which always uses the batch form:
+// DELETE /gitconfigs?gitconfigs[]=a&gitconfigs[]=b, even for a single id).
+func (c *Client) DeleteGitconfig(ids []string) error {
+	q := url.Values{}
+	for _, id := range ids {
+		q.Add("gitconfigs[]", id)
+	}
+	return c.do("DELETE", "/gitconfigs?"+q.Encode(), nil, nil)
+}
+
 // CreateService creates a new service instance.
 func (c *Client) CreateService(
 	namespace string,
