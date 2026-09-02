@@ -1113,3 +1113,149 @@ func (c *Client) PushApp(
 		Image:   stageResp.ImageURL,
 	}, nil
 }
+
+// uploadMultipart posts or patches a multipart/form-data request with a file
+// field and optional extra form fields.
+func (c *Client) uploadMultipart(
+	method,
+	apiPath string,
+	source io.Reader,
+	fileName string,
+	fields map[string]string,
+	result any,
+) error {
+	var buf bytes.Buffer
+	writer := multipart.NewWriter(&buf)
+	part, err := writer.CreateFormFile("file", fileName)
+	if err != nil {
+		return fmt.Errorf("create multipart form: %w", err)
+	}
+	if _, err := io.Copy(part, source); err != nil {
+		return fmt.Errorf("write to multipart form: %w", err)
+	}
+	for key, value := range fields {
+		if err := writer.WriteField(key, value); err != nil {
+			return fmt.Errorf("write form field %q: %w", key, err)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		return fmt.Errorf("close multipart form: %w", err)
+	}
+
+	req, err := http.NewRequest(method, c.url(apiPath), &buf)
+	if err != nil {
+		return fmt.Errorf("create upload request: %w", err)
+	}
+	c.setAuth(req)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("upload: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf(
+			"upload error %d: %s",
+			resp.StatusCode,
+			string(body),
+		)
+	}
+	if result == nil {
+		return nil
+	}
+	if err := json.Unmarshal(body, result); err != nil {
+		return fmt.Errorf("unmarshal upload response: %w", err)
+	}
+	return nil
+}
+
+// AppSourcePatch uploads a source patch tar and triggers buildpack staging
+// plus supervisor installation. processCmd overrides the supervisor fallback
+// command for non-CNB images (e.g. "/app/bin/start").
+func (c *Client) AppSourcePatch(
+	namespace,
+	name string,
+	source io.Reader,
+	processCmd string,
+) (*StageResponse, error) {
+	fields := map[string]string{}
+	if processCmd != "" {
+		fields["process_cmd"] = processCmd
+	}
+
+	var resp StageResponse
+	err := c.uploadMultipart(
+		http.MethodPatch,
+		"/namespaces/"+namespace+"/applications/"+name+"/source",
+		source,
+		"source.tar.gz",
+		fields,
+		&resp,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// AppSync streams a tar of changed files or a compiled binary into the
+// running pod. mode must be "files" or "binary". dest overrides the default
+// destination inside the pod. binaryName is the basename inside the tar for
+// binary mode.
+func (c *Client) AppSync(
+	namespace,
+	name string,
+	source io.Reader,
+	mode,
+	dest,
+	binaryName string,
+) error {
+	if mode == "" {
+		mode = "files"
+	}
+	if mode != "files" && mode != "binary" {
+		return fmt.Errorf("invalid sync mode %q: must be files or binary", mode)
+	}
+
+	fields := map[string]string{"mode": mode}
+	if dest != "" {
+		fields["dest"] = dest
+	}
+	if binaryName != "" {
+		fields["binary_name"] = binaryName
+	}
+
+	var resp APIResponse
+	return c.uploadMultipart(
+		http.MethodPost,
+		"/namespaces/"+namespace+"/applications/"+name+"/sync",
+		source,
+		"sync.tar",
+		fields,
+		&resp,
+	)
+}
+
+// WatchAppStartup runs the app-watch startup phase: source patch, wait for
+// staging, then wait for the app to become ready with the supervisor installed.
+func (c *Client) WatchAppStartup(
+	namespace,
+	name string,
+	source io.Reader,
+	processCmd string,
+) (*StageResponse, error) {
+	stageResp, err := c.AppSourcePatch(namespace, name, source, processCmd)
+	if err != nil {
+		return nil, fmt.Errorf("source patch: %w", err)
+	}
+	if err := c.StagingComplete(namespace, stageResp.Stage.ID); err != nil {
+		return nil, fmt.Errorf("staging wait: %w", err)
+	}
+	if err := c.AppRunning(namespace, name); err != nil {
+		return nil, fmt.Errorf("app running wait: %w", err)
+	}
+	return stageResp, nil
+}

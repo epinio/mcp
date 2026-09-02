@@ -19,6 +19,7 @@ func RegisterCore(server *mcp.Server, c *client.Client) {
 	RegisterServiceTools(server, c)
 	RegisterLogTools(server, c)
 	RegisterPushTools(server, c)
+	RegisterWatchTools(server, c)
 	RegisterCloneTools(server, c)
 	RegisterAppSourceTools(server, c)
 	RegisterConnectionInfoTools(server, c)

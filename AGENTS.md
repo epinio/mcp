@@ -43,6 +43,7 @@ epinio-mcp/
 │   ├── apps.go              # list/show/create/delete/restart/scale/update
 │   │                        #   (mutating tools consult appMutationGuard)
 │   ├── push.go              # push_app / upload_and_stage / deploy_staged
+│   ├── watch.go             # watch_app_startup / sync_app (inner-loop dev)
 │   ├── source.go            # get_app_source / list_app_files (via GET .../source API)
 │   ├── logs.go              # app_logs
 │   ├── env.go               # env vars

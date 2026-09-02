@@ -116,6 +116,62 @@ func buildTarGz(files map[string]string) (io.Reader, error) {
 	return &buf, nil
 }
 
+// buildTar creates an in-memory plain tar archive from a map of filepath->content.
+// Used by app-watch sync, which expects an uncompressed tar.
+func buildTar(files map[string]string) (io.Reader, error) {
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+
+	for filePath, content := range files {
+		filePath = strings.TrimPrefix(filePath, "/")
+		filePath = strings.TrimPrefix(filePath, "./")
+		filePath = strings.Trim(filePath, "\"'")
+		if filePath == "" {
+			continue
+		}
+
+		dir := path.Dir(filePath)
+		if dir != "." && dir != "" {
+			parts := strings.Split(dir, "/")
+			for i := range parts {
+				dirPath := strings.Join(parts[:i+1], "/") + "/"
+				if err := tw.WriteHeader(&tar.Header{
+					Name:     dirPath,
+					Typeflag: tar.TypeDir,
+					Mode:     0755,
+				}); err != nil {
+					return nil, fmt.Errorf(
+						"write tar dir header for %s: %w",
+						dirPath,
+						err,
+					)
+				}
+			}
+		}
+
+		data := []byte(content)
+		if err := tw.WriteHeader(&tar.Header{
+			Name: filePath,
+			Mode: 0644,
+			Size: int64(len(data)),
+		}); err != nil {
+			return nil, fmt.Errorf("write tar header for %s: %w", filePath, err)
+		}
+		if _, err := tw.Write(data); err != nil {
+			return nil, fmt.Errorf(
+				"write tar content for %s: %w",
+				filePath,
+				err,
+			)
+		}
+	}
+
+	if err := tw.Close(); err != nil {
+		return nil, fmt.Errorf("close tar: %w", err)
+	}
+	return &buf, nil
+}
+
 // processFiles checks if any file values are base64-encoded (prefixed with
 // "base64:") and decodes them, returning the raw bytes map.
 func processFiles(files map[string]string) map[string]string {
