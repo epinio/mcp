@@ -260,3 +260,168 @@ func TestTruncate(t *testing.T) {
 		t.Errorf("truncate = %q, want abcd…", got)
 	}
 }
+
+// fakeEpinioMe returns an httptest server standing in for Epinio's
+// authenticated /me endpoint. It accepts exactly one credential, so a test can
+// prove that anything else is refused.
+func fakeEpinioMe(t *testing.T, wantAuth string) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/me" {
+			http.NotFound(w, r)
+			return
+		}
+		if r.Header.Get("Authorization") != wantAuth {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"user": "someone@example.com"})
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// The point of this suite: there is no anonymous path to the tools. Every case
+// that is not a credential Epinio accepts must end in 401, never in a session.
+func TestRequireEpinioAuth(t *testing.T) {
+	const prmURL = "https://mcp.example.com/.well-known/oauth-protected-resource"
+	const goodAuth = "Bearer good-token"
+
+	reached := false
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reached = true
+		if _, ok := callerFrom(r.Context()); !ok {
+			t.Error("handler ran without a caller in context")
+		}
+		w.WriteHeader(http.StatusOK)
+	})
+
+	cases := []struct {
+		name       string
+		authHeader string
+		wantStatus int
+		wantReach  bool
+		wantErr    string
+	}{
+		{
+			name:       "no credential is refused, not served anonymously",
+			authHeader: "",
+			wantStatus: http.StatusUnauthorized,
+		},
+		{
+			name:       "unparseable scheme does not fall back to server creds",
+			authHeader: "Token something",
+			wantStatus: http.StatusUnauthorized,
+			wantErr:    "invalid_request",
+		},
+		{
+			name:       "credential Epinio rejects is refused",
+			authHeader: "Bearer wrong-token",
+			wantStatus: http.StatusUnauthorized,
+			wantErr:    "invalid_token",
+		},
+		{
+			name:       "credential Epinio accepts is let through",
+			authHeader: goodAuth,
+			wantStatus: http.StatusOK,
+			wantReach:  true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			reached = false
+			srv := fakeEpinioMe(t, goodAuth)
+
+			req := httptest.NewRequest(http.MethodPost, "/", nil)
+			if tc.authHeader != "" {
+				req.Header.Set("Authorization", tc.authHeader)
+			}
+			rec := httptest.NewRecorder()
+
+			requireEpinioAuth(srv.URL, prmURL, next).ServeHTTP(rec, req)
+
+			if rec.Code != tc.wantStatus {
+				t.Errorf("status = %d, want %d", rec.Code, tc.wantStatus)
+			}
+			if reached != tc.wantReach {
+				t.Errorf("handler reached = %v, want %v", reached, tc.wantReach)
+			}
+			if tc.wantStatus != http.StatusUnauthorized {
+				return
+			}
+			// A 401 is only useful to a client if it says where to log in.
+			challenge := rec.Header().Get("WWW-Authenticate")
+			if !strings.Contains(challenge, prmURL) {
+				t.Errorf("challenge %q does not point at the metadata", challenge)
+			}
+			if !strings.Contains(challenge, epinioAudienceScope) {
+				t.Errorf("challenge %q does not request the epinio-api audience", challenge)
+			}
+			if tc.wantErr != "" && !strings.Contains(challenge, tc.wantErr) {
+				t.Errorf("challenge %q missing error code %q", challenge, tc.wantErr)
+			}
+		})
+	}
+}
+
+// Epinio being broken must not read as "your login is bad", or the client will
+// loop through a login that was never the problem.
+func TestRequireEpinioAuthUpstreamFailure(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	t.Cleanup(srv.Close)
+
+	req := httptest.NewRequest(http.MethodPost, "/", nil)
+	req.Header.Set("Authorization", "Bearer whatever")
+	rec := httptest.NewRecorder()
+
+	requireEpinioAuth(srv.URL, "https://mcp.example.com/prm", http.HandlerFunc(
+		func(w http.ResponseWriter, r *http.Request) {
+			t.Error("handler must not run when Epinio cannot be reached")
+		},
+	)).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadGateway {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusBadGateway)
+	}
+}
+
+func TestPRMHandler(t *testing.T) {
+	rec := httptest.NewRecorder()
+	prmHandler("https://mcp.example.com", "https://auth.example.com")(
+		rec, httptest.NewRequest(http.MethodGet, "/.well-known/oauth-protected-resource", nil),
+	)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+
+	var doc struct {
+		Resource             string   `json:"resource"`
+		AuthorizationServers []string `json:"authorization_servers"`
+		ScopesSupported      []string `json:"scopes_supported"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&doc); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	// Clients compare this against the URL the user typed and refuse a mismatch.
+	if doc.Resource != "https://mcp.example.com" {
+		t.Errorf("resource = %q", doc.Resource)
+	}
+	if len(doc.AuthorizationServers) != 1 ||
+		doc.AuthorizationServers[0] != "https://auth.example.com" {
+		t.Errorf("authorization_servers = %v", doc.AuthorizationServers)
+	}
+	found := false
+	for _, s := range doc.ScopesSupported {
+		if s == epinioAudienceScope {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("scopes_supported %v lacks the epinio-api audience scope", doc.ScopesSupported)
+	}
+}

@@ -21,6 +21,45 @@ Full documentation lives at **[docs.epinio.io](https://docs.epinio.io)**:
 - **[Install the MCP server](https://docs.epinio.io/getting-started/install-mcp)** — prerequisites, configuration, and deployment.
 - **[MCP server reference](https://docs.epinio.io/reference/mcp)** — the full tool list, optional capabilities, and health probes.
 
+## Authentication
+
+Every request must carry a credential that Epinio itself accepts, and there is
+no anonymous or server-credential fallback: a caller without an Epinio account
+(a local user, or an identity from Dex) gets a 401 and no tools. The server
+holds no credentials of its own, and each tool call runs as the caller.
+
+For Claude and other OAuth-capable clients, the server is an OAuth 2.0
+protected resource. It answers an unauthenticated request with a 401 and a
+`WWW-Authenticate` header pointing at its metadata
+(`/.well-known/oauth-protected-resource`), which names your Dex as the
+authorization server. The client then runs a normal login and sends the
+resulting token.
+
+Two settings are required, and the server refuses to start without them:
+
+| Variable | Meaning |
+|---|---|
+| `EPINIO_MCP_RESOURCE_URL` | The URL users enter in their MCP client, exactly. Clients compare it against the metadata and refuse a mismatch. |
+| `EPINIO_MCP_OIDC_ISSUER` | The Dex issuer in front of your Epinio, normally `https://auth.<your-domain>`. |
+
+Your Dex also needs a client for the tool, registered through the Epinio
+chart's `dex.extraClients` value. Clients listed there become trusted peers of
+`epinio-api`, which is what lets Dex issue a token the Epinio API will accept.
+For Claude, register the redirect URI `https://claude.ai/api/mcp/auth_callback`.
+
+Claude Code needs one more step. It is a native client on a loopback port, and
+Dex matches registered redirect URIs exactly, so pin the port on both sides:
+register `http://localhost:3118/callback` (and the `127.0.0.1` form) in Dex,
+then add the server with a matching port. Dex supports neither dynamic client
+registration nor CIMD, so pass the client ID explicitly; no secret is needed,
+because the client is public and Claude Code uses PKCE:
+
+```bash
+claude mcp add --transport http \
+  --client-id claude-mcp --callback-port 3118 \
+  epinio https://epinio-mcp.example.com
+```
+
 ## Install
 
 Clone the repo, set your cluster details in `epinio.yml`, then:

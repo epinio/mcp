@@ -125,29 +125,6 @@ subjects:
     name: epinio-mcp
     namespace: epinio
 
----
-# Server-level fallback identity. Per-request caller auth (bearer / basic via
-# Authorization header) overrides these values. Leave token fields empty to
-# use basic auth with Epinio's local password store.
-apiVersion: v1
-kind: Secret
-metadata:
-  name: epinio-mcp-auth
-  namespace: epinio
-  labels:
-    app.kubernetes.io/name: epinio-mcp
-type: Opaque
-stringData:
-  # Basic auth against Epinio's local password store.
-  # EDIT ME: replace with real credentials for your cluster.
-  username: "admin"
-  password: "password"
-  # --- OR use OIDC refresh-token auth (leave basic auth empty if you do) ---
-  # token: ""
-  # refresh_token: ""
-  # token_endpoint: "https://auth.epinio.example.com/token"
-
----
 # Optional: uncomment + edit if the image is in a private registry.
 # Reference from the Deployment's imagePullSecrets below.
 # apiVersion: v1
@@ -218,38 +195,15 @@ spec:
               value: "epinio"
             - name: PORT
               value: "8080"
-            # Auth — each reads from a key in epinio-mcp-auth. All optional;
-            # main.go picks an auth mode based on which are set.
-            - name: EPINIO_USERNAME
-              valueFrom:
-                secretKeyRef:
-                  name: epinio-mcp-auth
-                  key: username
-                  optional: true
-            - name: EPINIO_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: epinio-mcp-auth
-                  key: password
-                  optional: true
-            - name: EPINIO_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: epinio-mcp-auth
-                  key: token
-                  optional: true
-            - name: EPINIO_REFRESH_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: epinio-mcp-auth
-                  key: refresh_token
-                  optional: true
-            - name: EPINIO_TOKEN_ENDPOINT
-              valueFrom:
-                secretKeyRef:
-                  name: epinio-mcp-auth
-                  key: token_endpoint
-                  optional: true
+            # Auth. This server keeps no credentials: every caller logs in
+            # through Dex and is authenticated against Epinio per request.
+            # Both values are required and the server exits without them.
+            - name: EPINIO_MCP_RESOURCE_URL
+              # EDIT ME: the URL users enter in their MCP client, exactly.
+              value: "https://epinio-mcp.example.com"
+            - name: EPINIO_MCP_OIDC_ISSUER
+              # EDIT ME: the Dex issuer, normally https://auth.<your-domain>.
+              value: "https://auth.example.com"
           readinessProbe:
             httpGet:
               path: /readyz
