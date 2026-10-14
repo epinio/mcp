@@ -127,7 +127,7 @@ func (c *Client) setAuth(req *http.Request) {
 		req.Header.Set("Authorization", "Bearer "+c.Token)
 	} else if c.Token != "" {
 		req.Header.Set("Authorization", "Bearer "+c.Token)
-	} else if c.Username != "" || c.Password != "" {
+	} else if c.Username != "" && c.Password != "" {
 		req.SetBasicAuth(c.Username, c.Password)
 	}
 }
