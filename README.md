@@ -8,11 +8,19 @@ the [Epinio](https://epinio.io) API as tools for AI agents such as Claude. It
 runs on your cluster and translates MCP tool calls into Epinio REST API requests,
 so an agent can deploy and manage applications through conversation.
 
-By default the server wires only to the Epinio API, running as the calling user — app lifecycle, logs, source retrieval, inner-loop app watch sync, and CRUD for app charts, builder images, and catalog services. A single elevated capability set that reaches directly into Kubernetes — workload adoption — is off by default and opt-in via the EPINIO_MCP_ELEVATED flag. See the reference docs.
+By default the server wires **only** to the Epinio API, running as the calling
+user — app lifecycle, logs, source retrieval, inner-loop app watch sync, and
+CRUD for app charts, builder images, and catalog services. A single elevated
+capability set that reaches directly into Kubernetes — workload **adoption** —
+is **off by default** and opt-in via the `EPINIO_MCP_ELEVATED` flag. See the
+reference docs.
 
-**Requires Epinio 1.14.1 or later.** The server depends on the builder-image,
-catalog-service, and app-chart CRUD API and the source-retrieval endpoint, all
-introduced in Epinio 1.14.1; it will not work against earlier releases.
+**Requires a current
+[Epinio release](https://github.com/epinio/epinio/releases).** The server
+depends on the builder-image, catalog-service, and app-chart CRUD API and the
+source-retrieval endpoint, and login depends on the chart's
+`dex.extraStaticClients` and `dex.apiTrustedPeers` values; older releases lack
+one or the other.
 
 ## Documentation
 
@@ -42,10 +50,11 @@ Two settings are required, and the server refuses to start without them:
 | `EPINIO_MCP_RESOURCE_URL` | The URL users enter in their MCP client, exactly. Clients compare it against the metadata and refuse a mismatch. |
 | `EPINIO_MCP_OIDC_ISSUER` | The Dex issuer in front of your Epinio, normally `https://auth.<your-domain>`. |
 
-Your Dex also needs a client for the tool, registered through the Epinio
-chart's `dex.extraClients` value. Clients listed there become trusted peers of
-`epinio-api`, which is what lets Dex issue a token the Epinio API will accept.
-For Claude, register the redirect URI `https://claude.ai/api/mcp/auth_callback`.
+Your Dex also needs a client for the tool. Register it with the Epinio chart's
+`dex.extraStaticClients` value, and list its ID in `dex.apiTrustedPeers` so it
+becomes a trusted peer of `epinio-api`, which is what lets Dex issue a token
+the Epinio API will accept. For Claude, register the redirect URI
+`https://claude.ai/api/mcp/auth_callback`.
 
 Claude Code needs one more step. It is a native client on a loopback port, and
 Dex matches registered redirect URIs exactly, so pin the port on both sides:
@@ -87,7 +96,18 @@ make help      # list all targets
 To run the server against a cluster locally:
 
 ```bash
-EPINIO_API_URL=https://epinio.example.com EPINIO_USERNAME=admin EPINIO_PASSWORD=secret make run
+EPINIO_API_URL=https://epinio.example.com \
+EPINIO_MCP_RESOURCE_URL=http://localhost:8080 \
+EPINIO_MCP_OIDC_ISSUER=https://auth.example.com \
+  make run
+```
+
+The server holds no credentials, so each request still needs its own. To check
+a local Epinio user, send Basic auth; any status other than 401 means Epinio
+accepted the credential:
+
+```bash
+curl -i -u admin:password http://localhost:8080/
 ```
 
 ## License

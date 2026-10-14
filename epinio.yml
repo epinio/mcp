@@ -9,13 +9,13 @@ configuration:
   appchart: standard
   environment:
     # EDIT before pushing — set these to your Epinio cluster values.
-    EPINIO_API_URL: "https://epinio.apps-dev.internal.krum.io"
+    EPINIO_API_URL: "https://epinio.192.168.49.2.sslip.io"
     # The URL users type into their MCP client. Must match exactly: clients
     # compare it against the metadata document and refuse a mismatch. This is
     # the route Epinio gives the app, <app-name>.<epinio-domain>.
-    EPINIO_MCP_RESOURCE_URL: "https://epinio-mcp.apps-dev.internal.krum.io"
+    EPINIO_MCP_RESOURCE_URL: "https://epinio-mcp.192.168.49.2.sslip.io"
     # The Dex issuer fronting this Epinio, normally https://auth.<your-domain>.
-    EPINIO_MCP_OIDC_ISSUER: "https://auth.apps-dev.internal.krum.io"
+    EPINIO_MCP_OIDC_ISSUER: "https://auth.192.168.49.2.sslip.io"
     # No server credentials. Every caller authenticates as themselves against
     # Epinio; a caller without an Epinio account gets no tools.
 
