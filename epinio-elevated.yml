@@ -17,8 +17,11 @@ configuration:
   environment:
     # EDIT before pushing — set these to your Epinio cluster values
     EPINIO_API_URL: "https://epinio.192.168.49.2.sslip.io"
-    EPINIO_USERNAME: "admin"
-    EPINIO_PASSWORD: "password"
+    # The URL users type into their MCP client, and the Dex issuer fronting
+    # this Epinio. Both required: callers authenticate as themselves, and this
+    # server holds no credentials of its own.
+    EPINIO_MCP_RESOURCE_URL: "https://epinio-mcp.192.168.49.2.sslip.io"
+    EPINIO_MCP_OIDC_ISSUER: "https://auth.192.168.49.2.sslip.io"
     # Enables the elevated tier: workload adoption (adopt/reconcile/release) +
     # the capability framework (check/enable, self-adoption).
     EPINIO_MCP_ELEVATED: "true"

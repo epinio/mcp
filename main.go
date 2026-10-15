@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -24,33 +25,34 @@ var version = "dev"
 
 func main() {
 	apiURL := envOrDefault("EPINIO_API_URL", "https://epinio.example.com")
-	token := os.Getenv("EPINIO_TOKEN")
-	refreshToken := os.Getenv("EPINIO_REFRESH_TOKEN")
-	tokenEndpoint := os.Getenv("EPINIO_TOKEN_ENDPOINT")
-	clientID := envOrDefault("EPINIO_OIDC_CLIENT_ID", "epinio-cli")
-	username := envOrDefault("EPINIO_USERNAME", "admin")
-	password := envOrDefault("EPINIO_PASSWORD", "password")
 	port := envOrDefault("PORT", "8080")
 
-	var c *client.Client
-	if token != "" && refreshToken != "" && tokenEndpoint != "" {
-		c = client.NewWithOIDC(
-			apiURL,
-			tokenEndpoint,
-			clientID,
-			token,
-			refreshToken,
+	// OAuth 2.0 resource-server configuration. Both values are required, and
+	// the server refuses to start without them: it has no credentials of its
+	// own, so if it cannot tell a client where to log in, it cannot serve
+	// anyone at all.
+	//
+	//   - resourceURL must equal the URL users enter in their MCP client,
+	//     exactly. RFC 9728 requires the metadata's "resource" to match, and
+	//     clients reject a mismatch.
+	//   - issuer is the Dex issuer that fronts this Epinio (https://auth.<domain>).
+	resourceURL := strings.TrimRight(os.Getenv("EPINIO_MCP_RESOURCE_URL"), "/")
+	issuer := strings.TrimRight(os.Getenv("EPINIO_MCP_OIDC_ISSUER"), "/")
+	if resourceURL == "" || issuer == "" {
+		log.Fatalf(
+			"EPINIO_MCP_RESOURCE_URL and EPINIO_MCP_OIDC_ISSUER are both required; " +
+				"this server authenticates every caller against Epinio and has no " +
+				"anonymous mode",
 		)
-		log.Printf("Using OIDC auth with token refresh")
-	} else if token != "" {
-		c = client.NewWithToken(apiURL, token)
-		log.Printf("Using static bearer token auth")
-	} else {
-		c = client.New(apiURL, username, password)
-		log.Printf("Using basic auth (user: %s)", username)
 	}
+	prmURL := resourceURL + wellKnownPRM
 
-	info, err := c.Info()
+	// The only client this process owns. It carries no credential and can
+	// therefore only reach Epinio's unauthenticated endpoints. Every tool call
+	// runs on a per-request client built from the caller's own token.
+	anon := client.NewAnonymous(apiURL)
+
+	info, err := anon.Info()
 
 	if err != nil {
 		log.Fatalf("failed to connect to Epinio API at %s: %v", apiURL, err)
@@ -90,41 +92,39 @@ func main() {
 		}
 	}
 
-	server := mcp.NewServer(impl, nil)
-	registerTools(server, c)
-
 	mcpHandler := mcp.NewStreamableHTTPHandler(func(r *http.Request) *mcp.Server {
-		// Per-request auth: forward whichever credential the caller sent to
-		// a dedicated Epinio client for this session, so all tool calls
-		// inherit the caller's identity. Falls back to server-level env-var
-		// auth when no Authorization header is present.
-		if authHeader := r.Header.Get("Authorization"); authHeader != "" {
-			if perReqClient := perRequestClient(
-				apiURL,
-				authHeader,
-			); perReqClient != nil {
-				perReqServer := mcp.NewServer(impl, nil)
-				registerTools(perReqServer, perReqClient)
-				return perReqServer
-			}
+		// requireEpinioAuth has already validated the caller and put their
+		// client in the request context, so every tool call runs as them.
+		// Returning nil makes the SDK answer 400; it should be unreachable.
+		c, ok := callerFrom(r.Context())
+		if !ok {
+			return nil
 		}
-		return server
+		log.Printf("new MCP session for Epinio user %q", c.user)
+		perReqServer := mcp.NewServer(impl, nil)
+		registerTools(perReqServer, c.client)
+		return perReqServer
 	}, nil)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", healthzHandler(impl.Version))
-	mux.HandleFunc("/readyz", readyzHandler(impl.Version, c))
-	// OAuth/OIDC discovery. This server authenticates by forwarding the caller's
-	// Authorization header (or its own env credentials) to Epinio — it is not an
-	// OAuth authorization server. MCP clients probe /.well-known/oauth-* before
-	// connecting; answer those with a clean 404 so a well-behaved client
-	// concludes "no OAuth required" and connects directly. Without this the
-	// probes fall through to the MCP handler below, which rejects them as
-	// malformed JSON-RPC and breaks the client's OAuth error handling.
+	mux.HandleFunc("/readyz", readyzHandler(impl.Version, anon))
+
+	// RFC 9728 protected resource metadata. This is how a client discovers
+	// which authorization server to send the user to. Clients probe the
+	// path-suffixed form first and the bare form second, so serve the subtree.
+	prm := prmHandler(resourceURL, issuer)
+	mux.HandleFunc(wellKnownPRM, prm)
+	mux.HandleFunc(wellKnownPRM+"/", prm)
+	// This server is a resource server, not an authorization server: anything
+	// else under /.well-known/ is not ours to answer.
 	mux.HandleFunc("/.well-known/", http.NotFound)
-	// Everything else (including the MCP Streamable HTTP paths) falls through
-	// to the MCP handler, optionally wrapped with request logging.
-	mux.Handle("/", withRequestLogging(mcpHandler))
+
+	// Everything else (including the MCP Streamable HTTP paths) is protected.
+	// No credential, no tools — there is deliberately no anonymous fallback.
+	mux.Handle("/", withRequestLogging(
+		requireEpinioAuth(apiURL, prmURL, mcpHandler),
+	))
 
 	addr := fmt.Sprintf(":%s", port)
 	log.Printf("Epinio MCP server listening on %s", addr)
@@ -133,10 +133,152 @@ func main() {
 	}
 }
 
+// wellKnownPRM is the RFC 9728 protected-resource-metadata path.
+const wellKnownPRM = "/.well-known/oauth-protected-resource"
+
+// epinioAudienceScope is Dex's cross-client trust scope. Epinio verifies every
+// token with client ID "epinio-api", so a token minted for any other client is
+// rejected no matter how valid it is. Asking for this scope makes Dex issue a
+// token whose audience is epinio-api, which is the same trick the Epinio CLI
+// uses. A client for this server must be listed in epinio-api's trustedPeers.
+const epinioAudienceScope = "audience:server:client_id:epinio-api"
+
+// requestedScopes is what a client should ask the authorization server for.
+// Advertised in the metadata document and repeated in the 401 challenge.
+var requestedScopes = []string{
+	"openid",
+	"profile",
+	"email",
+	"groups",
+	"federated:id",
+	epinioAudienceScope,
+}
+
+// caller is an authenticated MCP client: the Epinio client built from their
+// credential, plus who Epinio says they are.
+type caller struct {
+	client *client.Client
+	user   string
+}
+
+type callerKey struct{}
+
+func callerFrom(ctx context.Context) (*caller, bool) {
+	c, ok := ctx.Value(callerKey{}).(*caller)
+	return c, ok
+}
+
+// prmHandler serves RFC 9728 protected resource metadata, pointing clients at
+// the Dex instance in front of this Epinio.
+func prmHandler(resourceURL, issuer string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		// Discovery is pre-authentication by definition, and browsers preflight
+		// it from the client origin.
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"resource":                 resourceURL,
+			"authorization_servers":    []string{issuer},
+			"bearer_methods_supported": []string{"header"},
+			"scopes_supported":         requestedScopes,
+			"resource_documentation":   "https://docs.epinio.io/reference/mcp",
+		})
+	}
+}
+
+// unauthorized answers with the challenge that starts an OAuth login. The 401
+// status is what makes a client begin discovery; the resource_metadata pointer
+// is what tells it where to look.
+func unauthorized(w http.ResponseWriter, prmURL, errCode, description string) {
+	challenge := fmt.Sprintf(
+		`Bearer resource_metadata=%q, scope=%q`,
+		prmURL,
+		strings.Join(requestedScopes, " "),
+	)
+	if errCode == "" {
+		// No credential at all is not an error condition, it is the start of
+		// the login handshake, so the challenge carries no error code. The
+		// body still explains itself for anyone reading it by hand.
+		description = "authentication required: log in to Epinio via " +
+			"the authorization server in the linked resource metadata"
+	} else {
+		challenge += fmt.Sprintf(
+			`, error=%q, error_description=%q`,
+			errCode,
+			description,
+		)
+	}
+	w.Header().Set("WWW-Authenticate", challenge)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusUnauthorized)
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"error":             errCode,
+		"error_description": description,
+	})
+}
+
+// requireEpinioAuth gates every MCP request on a credential that Epinio itself
+// accepts. There is no fallback: a caller without an Epinio account (local user
+// or Dex identity) gets a 401 and no tools.
+//
+// Epinio is the only authority here on purpose. This server does not keep a
+// user list, does not verify JWTs itself, and cannot be configured to trust
+// anyone Epinio would not. Asking Epinio's authenticated /me endpoint is the
+// whole check: if Epinio answers, the caller is real, and the same credential
+// is what every subsequent tool call will run under.
+func requireEpinioAuth(apiURL, prmURL string, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authHeader := r.Header.Get("Authorization")
+		if authHeader == "" {
+			unauthorized(w, prmURL, "", "")
+			return
+		}
+
+		cl := perRequestClient(apiURL, authHeader)
+		if cl == nil {
+			unauthorized(
+				w,
+				prmURL,
+				"invalid_request",
+				"unsupported Authorization scheme: expected Bearer or Basic",
+			)
+			return
+		}
+
+		me, err := cl.Me()
+		if err != nil {
+			if client.IsUnauthorized(err) {
+				unauthorized(
+					w,
+					prmURL,
+					"invalid_token",
+					"Epinio rejected the credential",
+				)
+				return
+			}
+			// Epinio is reachable but unhappy for some other reason. Saying
+			// 401 here would send the client into a pointless re-login loop.
+			log.Printf("auth check failed against Epinio: %v", err)
+			http.Error(
+				w,
+				"cannot verify credential with Epinio",
+				http.StatusBadGateway,
+			)
+			return
+		}
+
+		ctx := context.WithValue(
+			r.Context(),
+			callerKey{},
+			&caller{client: cl, user: me.User},
+		)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
 // perRequestClient builds an Epinio client scoped to a single MCP session
-// using whichever credential flavor the caller presented. Returns nil if
-// the Authorization header is present but unrecognized — the caller will
-// fall back to the server-level client in that case.
+// using whichever credential flavor the caller presented. Returns nil if the
+// Authorization header is unrecognized, which the caller turns into a 401.
 //
 // Recognized headers:
 //
@@ -374,8 +516,9 @@ func healthzHandler(version string) http.HandlerFunc {
 // is unreachable (upstream outage, token expiry), the probe returns 503 so
 // a fronting load balancer stops sending traffic until recovery.
 //
-// The upstream check uses the server-level Client (env-var auth). Per-request
-// tokens are not validated here — they're only seen inside a session.
+// The check runs without credentials against Epinio's unauthenticated /info,
+// so readiness reflects reachability only. Caller credentials are validated
+// per request, not here.
 func readyzHandler(version string, c *client.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		body := map[string]any{

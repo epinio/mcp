@@ -407,3 +407,10 @@ type GitconfigCreateRequest struct {
 	Password     string `json:"password,omitempty"` // nolint:gosec // intentional auth field for git config
 	Certificates []byte `json:"certs,omitempty"`
 }
+
+// MeResponse is Epinio's answer on GET /api/v1/me: who the caller is, and
+// what they may do. Only the fields this server needs are modeled.
+type MeResponse struct {
+	User       string   `json:"user,omitempty"`
+	Namespaces []string `json:"namespaces,omitempty"`
+}

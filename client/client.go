@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -48,6 +49,17 @@ func New(baseURL, username, password string) *Client {
 		BaseURL:    baseURL,
 		Username:   username,
 		Password:   password,
+		httpClient: &http.Client{Transport: tlsTransport()},
+	}
+}
+
+// NewAnonymous creates a client that sends no credentials at all. It is only
+// good for Epinio's unauthenticated endpoints (/api/v1/info), which is exactly
+// what the startup and readiness checks need: proof that Epinio is reachable,
+// without this server holding any credential of its own.
+func NewAnonymous(baseURL string) *Client {
+	return &Client{
+		BaseURL:    strings.TrimRight(baseURL, "/"),
 		httpClient: &http.Client{Transport: tlsTransport()},
 	}
 }
@@ -115,7 +127,7 @@ func (c *Client) setAuth(req *http.Request) {
 		req.Header.Set("Authorization", "Bearer "+c.Token)
 	} else if c.Token != "" {
 		req.Header.Set("Authorization", "Bearer "+c.Token)
-	} else {
+	} else if c.Username != "" && c.Password != "" {
 		req.SetBasicAuth(c.Username, c.Password)
 	}
 }
@@ -169,7 +181,7 @@ func (c *Client) do(method, path string, body any, result any) error {
 				len(respBody),
 			)
 		}
-		return fmt.Errorf("API error %d: %s", resp.StatusCode, snippet)
+		return &APIError{StatusCode: resp.StatusCode, Body: snippet}
 	}
 
 	if result != nil {
@@ -223,6 +235,40 @@ func isProxyTimeout(err error) bool {
 		return true
 	}
 	return false
+}
+
+// APIError is a non-2xx response from the Epinio API. It carries the status
+// code so callers can distinguish "your credential is bad" (401/403) from
+// "Epinio is broken" (5xx). The message format is unchanged.
+type APIError struct {
+	StatusCode int
+	Body       string
+}
+
+func (e *APIError) Error() string {
+	return fmt.Sprintf("API error %d: %s", e.StatusCode, e.Body)
+}
+
+// IsUnauthorized reports whether err is an Epinio rejection of the caller's
+// credential, as opposed to any other failure.
+func IsUnauthorized(err error) bool {
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
+		return false
+	}
+	return apiErr.StatusCode == http.StatusUnauthorized ||
+		apiErr.StatusCode == http.StatusForbidden
+}
+
+// Me returns the currently authenticated user. Epinio requires authentication
+// on this endpoint (unlike /info), which makes it the cheapest way to ask
+// Epinio "is this caller someone you know?".
+func (c *Client) Me() (*MeResponse, error) {
+	var resp MeResponse
+	if err := c.do("GET", "/me", nil, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
 }
 
 // Info returns server information.
