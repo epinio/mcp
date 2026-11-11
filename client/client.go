@@ -757,6 +757,49 @@ func (c *Client) DeleteAppChart(name string) error {
 	return c.do("DELETE", "/appcharts/"+url.PathEscape(name), nil, nil)
 }
 
+// PushAppChart uploads a helm chart archive to Epinio's registry and creates
+// (or replaces, when unused) the application chart of the given name.
+// Description and shortDescription are optional. fileName is the multipart
+// filename; when empty, "chart.tgz" is used.
+func (c *Client) PushAppChart(
+	name string,
+	archive io.Reader,
+	fileName string,
+	description, shortDescription string,
+) (*AppChartPushResponse, error) {
+	if name == "" {
+		return nil, fmt.Errorf("name is required")
+	}
+	if archive == nil {
+		return nil, fmt.Errorf("archive is required")
+	}
+	if fileName == "" {
+		fileName = "chart.tgz"
+	}
+
+	fields := map[string]string{"name": name}
+	if description != "" {
+		fields["description"] = description
+	}
+	if shortDescription != "" {
+		fields["short_description"] = shortDescription
+	}
+
+	var resp AppChartPushResponse
+	err := c.uploadMultipart(
+		http.MethodPost,
+		"/appcharts/push",
+		archive,
+		fileName,
+		fields,
+		&resp,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
 // --- BuilderImage CRUD (Epinio 1.14.1) ---
 
 // ListBuilderImages lists the BuilderImage entries registered on the cluster —

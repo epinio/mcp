@@ -263,3 +263,80 @@ func TestAppSyncInvalidMode(t *testing.T) {
 		t.Errorf("error = %q, want invalid sync mode", err.Error())
 	}
 }
+
+func TestPushAppChart(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/appcharts/push" {
+			http.NotFound(w, r)
+			return
+		}
+		if err := r.ParseMultipartForm(1 << 20); err != nil {
+			t.Errorf("ParseMultipartForm: %v", err)
+		}
+		for key, want := range map[string]string{
+			"name":              "mychart",
+			"description":       "long desc",
+			"short_description": "short",
+		} {
+			if got := r.FormValue(key); got != want {
+				t.Errorf("%s = %q, want %q", key, got, want)
+			}
+		}
+		file, header, err := r.FormFile("file")
+		if err != nil {
+			t.Fatalf("FormFile: %v", err)
+		}
+		defer file.Close()
+		if header.Filename != "chart.tgz" {
+			t.Errorf("filename = %q, want chart.tgz", header.Filename)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(AppChartPushResponse{
+			Name:      "mychart",
+			HelmChart: "epinio_appchart_mychart:0.1.0",
+			HelmRepo:  "oci://registry.example.com/apps",
+		})
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, "admin", "pw")
+	resp, err := c.PushAppChart(
+		"mychart",
+		strings.NewReader("fake-chart-tgz"),
+		"",
+		"long desc",
+		"short",
+	)
+	if err != nil {
+		t.Fatalf("PushAppChart() error = %v", err)
+	}
+	if resp.Name != "mychart" ||
+		resp.HelmChart != "epinio_appchart_mychart:0.1.0" ||
+		resp.HelmRepo != "oci://registry.example.com/apps" {
+		t.Errorf("PushAppChart() = %+v", resp)
+	}
+}
+
+func TestPushAppChartRequiresName(t *testing.T) {
+	c := New("https://example.com", "admin", "pw")
+	_, err := c.PushAppChart("", strings.NewReader("x"), "", "", "")
+	if err == nil || !strings.Contains(err.Error(), "name is required") {
+		t.Fatalf("PushAppChart() error = %v, want name is required", err)
+	}
+}
+
+func TestPushAppChartPropagatesHTTPError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"errors":[{"status":409,"title":"Conflict","details":"already exists"}]}`, http.StatusConflict)
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, "admin", "pw")
+	_, err := c.PushAppChart("mychart", strings.NewReader("x"), "", "", "")
+	if err == nil {
+		t.Fatal("PushAppChart() error = nil, want 409")
+	}
+	if !strings.Contains(err.Error(), "409") {
+		t.Fatalf("PushAppChart() error = %v, want 409", err)
+	}
+}
