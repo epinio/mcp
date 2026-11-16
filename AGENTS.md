@@ -50,7 +50,7 @@ epinio-mcp/
 │   ├── configurations.go    # configurations + bindings
 │   ├── services.go          # services + catalog (list/show)
 │   ├── clone.go             # get_app_manifest + clone_app
-│   ├── appcharts.go         # list_appcharts / show_appchart
+│   ├── appcharts.go         # list/show/create/push/update/delete_appchart
 │   ├── builders.go          # list_builders
 │   ├── gitconfigs.go        # list/show/match/create/delete_gitconfig (no update — see EPINIO-343 note in tools/gitconfigs.go)
 │   └── guidance.go          # MCP Prompts + get_build_guidance

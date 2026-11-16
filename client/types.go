@@ -307,6 +307,14 @@ type AppChartUpdateRequest struct {
 	Values           map[string]string       `json:"values,omitempty"`
 }
 
+// AppChartPushResponse is returned by POST /appcharts/push after the chart
+// archive is stored in Epinio's registry and the AppChart is created/replaced.
+type AppChartPushResponse struct {
+	Name      string `json:"name,omitempty"`
+	HelmChart string `json:"helm_chart,omitempty"`
+	HelmRepo  string `json:"helm_repo,omitempty"`
+}
+
 // BuilderImage is the REST DTO for the BuilderImage CRD — the cluster's
 // registry of builder images an app may stage with. Default and BoundApps are
 // read-only (operator policy / computed).
